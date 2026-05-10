@@ -1,4 +1,4 @@
-from interface_v3 import AppBrankas
+from ui.app import AppBrankas
 
 if __name__ == "__main__":
     app = AppBrankas()
