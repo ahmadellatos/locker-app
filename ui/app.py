@@ -6,12 +6,27 @@ Jendela utama aplikasi. Hanya bertanggung jawab untuk:
 """
 import customtkinter as ctk
 
+from .dnd import DND_AVAILABLE, TkinterDnD
 from .theme import FONT_TITLE, CLR_BG, CLR_ACCENT, CLR_ACCENT_HV, CLR_MUTED, CLR_BORDER
 from .tab_kunci import TabKunci
 from .tab_buka import TabBuka
 
 
-class AppBrankas(ctk.CTk):
+# TkinterDnD butuh root window yang punya DnD support.
+# Caranya: mixin TkinterDnD.DnDWrapper ke dalam CTk.
+# Kalau tkinterdnd2 tidak terinstall, pakai CTk biasa — app tetap jalan.
+if DND_AVAILABLE:
+    class _AppBase(ctk.CTk, TkinterDnD.DnDWrapper):
+        def __init__(self):
+            super().__init__()
+            self.TkdndVersion = TkinterDnD._require(self)
+else:
+    class _AppBase(ctk.CTk):
+        def __init__(self):
+            super().__init__()
+
+
+class AppBrankas(_AppBase):
     def __init__(self):
         super().__init__()
         self.title("Digital Locker — Professional")

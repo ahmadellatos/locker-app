@@ -11,6 +11,8 @@ env/
 # Build & Packaging (Untuk PyInstaller/Nuitka nanti)
 build/
 dist/
+release_build/
+*.exe
 *.spec
 *.bin
 

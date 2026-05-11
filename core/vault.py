@@ -75,6 +75,7 @@ class EncryptingStream:
         self.buffer = bytearray()
         self.chunk_size = CHUNK_SIZE # Tampung sampai 4MB
         self._last_pct = 0.0
+        self._flushed = False
 
     def write(self, data: bytes):
         self.buffer.extend(data)
@@ -100,12 +101,14 @@ class EncryptingStream:
         return len(data)
         
     def flush(self):
-        # Tembak sisa data terakhir yang belum mencapai 4MB
+        if self._flushed:       
+            return
+        self._flushed = True
         if self.buffer:
             encrypted = self.encryptor.update(bytes(self.buffer))
-            if encrypted:
-                self.target_file.write(encrypted)
-            self.buffer.clear()
+        if encrypted:
+            self.target_file.write(encrypted)
+        self.buffer.clear()
 
     def close(self): 
         self.flush()
@@ -202,6 +205,8 @@ def buka_brankas(locked_path: str, password: str,
                 panjang_nama = int.from_bytes(decrypted_first[:2], byteorder='big')
                 if panjang_nama > 512:
                     return "WRONG_PW", None
+                if len(decrypted_first) < 2 + panjang_nama:
+                    return "ERROR", "File brankas rusak atau terpotong."
                 nama_folder = decrypted_first[2:2 + panjang_nama].decode('utf-8')
             except Exception:
                 return "WRONG_PW", None

@@ -8,6 +8,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 
 from core.vault import kunci_brankas
+from .dnd import DND_AVAILABLE, register_drop_folder
 from .theme import (
     FONT_LABEL, FONT_SMALL, FONT_BTN,
     CLR_ACCENT, CLR_ACCENT_HV, CLR_DANGER, CLR_DANGER_HV,
@@ -15,6 +16,10 @@ from .theme import (
     STRENGTH_COLORS, STRENGTH_LABELS,
 )
 from .widgets import pw_strength, make_card, NotifBar, ProgressRow
+
+# Warna card saat drag hover
+CLR_CARD_HOVER  = "#252B42"
+CLR_BORDER_DRAG = CLR_ACCENT
 
 
 class TabKunci(ctk.CTkFrame):
@@ -39,11 +44,19 @@ class TabKunci(ctk.CTkFrame):
         self._build_action()
 
     def _build_card_folder(self):
-        card = make_card(self)
-        ctk.CTkLabel(card, text="📁  FOLDER TARGET", font=FONT_LABEL,
-                     text_color=CLR_MUTED).pack(anchor="w", padx=14, pady=(10, 6))
+        # Border width 2 agar bisa berubah warna saat drag hover
+        self._card_folder = ctk.CTkFrame(
+            self, fg_color=CLR_CARD, corner_radius=10,
+            border_width=2, border_color=CLR_CARD,   # transparan awalnya
+        )
+        self._card_folder.pack(fill="x", padx=20, pady=(0, 12))
 
-        row = ctk.CTkFrame(card, fg_color="transparent")
+        ctk.CTkLabel(
+            self._card_folder, text="📁  FOLDER TARGET", font=FONT_LABEL,
+            text_color=CLR_MUTED
+        ).pack(anchor="w", padx=14, pady=(10, 6))
+
+        row = ctk.CTkFrame(self._card_folder, fg_color="transparent")
         row.pack(fill="x", padx=14, pady=(0, 10))
 
         self.btn_browse = ctk.CTkButton(
@@ -60,19 +73,65 @@ class TabKunci(ctk.CTkFrame):
             command=self._clear_folder,
         )
 
+        # Label hint — teks berubah saat drag hover
         self.lbl_path = ctk.CTkLabel(
-            card, text="Belum ada folder dipilih",
+            self._card_folder,
+            text="Belum ada folder dipilih" + ("  ·  atau seret folder ke sini" if DND_AVAILABLE else ""),
             font=FONT_SMALL, text_color=CLR_MUTED, wraplength=390, anchor="w",
         )
         self.lbl_path.pack(anchor="w", padx=14, pady=(0, 6))
 
         self.chk_hapus = ctk.CTkCheckBox(
-            card, text="Hapus folder asli setelah dikunci",
+            self._card_folder, text="Hapus folder asli setelah dikunci",
             font=FONT_SMALL, text_color=CLR_MUTED, variable=self._var_hapus,
             fg_color=CLR_DANGER, hover_color=CLR_DANGER_HV,
             corner_radius=4, checkbox_width=18, checkbox_height=18,
         )
         self.chk_hapus.pack(anchor="w", padx=14, pady=(0, 12))
+
+        # Daftarkan seluruh card + semua children sebagai drop zone
+        self._register_dnd()
+
+    def _register_dnd(self):
+        """Daftarkan card folder sebagai drop zone untuk folder."""
+        # Widget yang didaftarkan: card utama + semua child
+        # agar area browse button juga bisa di-drop
+        targets = [self._card_folder, self.btn_browse, self.lbl_path, self.chk_hapus]
+        for widget in targets:
+            register_drop_folder(
+                widget,
+                on_drop=self._on_drop_folder,
+                on_enter=self._on_drag_enter,
+                on_leave=self._on_drag_leave,
+            )
+
+    def _on_drag_enter(self):
+        """Visual feedback saat drag masuk area card."""
+        self._card_folder.configure(
+            fg_color=CLR_CARD_HOVER,
+            border_color=CLR_BORDER_DRAG,
+        )
+        if not self._path_folder:
+            self.lbl_path.configure(
+                text="📂  Lepaskan folder di sini…",
+                text_color=CLR_ACCENT,
+            )
+
+    def _on_drag_leave(self):
+        """Restore tampilan saat drag keluar."""
+        self._card_folder.configure(
+            fg_color=CLR_CARD,
+            border_color=CLR_CARD,
+        )
+        if not self._path_folder:
+            self.lbl_path.configure(
+                text="Belum ada folder dipilih  ·  atau seret folder ke sini",
+                text_color=CLR_MUTED,
+            )
+
+    def _on_drop_folder(self, path: str):
+        """Handler saat folder berhasil di-drop."""
+        self._set_folder(path)
 
     def _build_card_password(self):
         card = make_card(self)
@@ -172,19 +231,24 @@ class TabKunci(ctk.CTkFrame):
 
     # ── Folder Picker ─────────────────────────────────────────────────────────
 
-    def _pilih_folder(self):
-        folder = filedialog.askdirectory()
-        if not folder:
-            return
-        self._path_folder = folder
-        tampil = folder if len(folder) < 50 else "…" + folder[-47:]
+    def _set_folder(self, path: str):
+        """Set folder yang dipilih — dipanggil dari browse maupun drag & drop."""
+        self._path_folder = path
+        tampil = path if len(path) < 50 else "…" + path[-47:]
         self.lbl_path.configure(text=tampil, text_color=CLR_ACCENT)
         self.btn_clear.pack(side="right", padx=(6, 0))
         self.notif.clear()
 
+    def _pilih_folder(self):
+        folder = filedialog.askdirectory()
+        if not folder:
+            return
+        self._set_folder(folder)
+
     def _clear_folder(self):
         self._path_folder = None
-        self.lbl_path.configure(text="Belum ada folder dipilih", text_color=CLR_MUTED)
+        hint = "Belum ada folder dipilih" + ("  ·  atau seret folder ke sini" if DND_AVAILABLE else "")
+        self.lbl_path.configure(text=hint, text_color=CLR_MUTED)
         self.btn_clear.pack_forget()
 
     # ── Process ───────────────────────────────────────────────────────────────
@@ -239,5 +303,7 @@ class TabKunci(ctk.CTkFrame):
             self._row_str.pack_forget()
             self._var_hapus.set(False)
             self._clear_folder()
+            # Auto-clear notif sukses setelah 5 detik
+            self.after(5000, self.notif.clear)
         else:
             self.notif.show("err", "✖  " + pesan)
