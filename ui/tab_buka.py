@@ -1,9 +1,13 @@
 """
-ui/tab_buka.py
-Adaptasi input box dengan ikon terintegrasi di dalamnya.
+Modul: tab_buka.py
+Deskripsi: Antarmuka untuk Tab "Buka Brankas". Menerima file brankas terkunci
+           ber-ekstensi '.locked' serta kata sandi dekripsinya. Menangani fallback
+           konflik file duplikat (overwrite), animasi parsing, serta proses dekripsi
+           secara single-pass di latar belakang.
 """
 
-import logging
+from loguru import logger
+import qtawesome as qta
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -14,16 +18,28 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFontMetrics
 
 from core.vault import buka_brankas
 from .widgets import CryptoWorker, AnimatedNotifBar, apply_shadow, BigActionBtn
 
-log = logging.getLogger(__name__)
+# Menginisialisasi handler fallback Notifikasi Desktop Native (OS Level).
+notification = None
+try:
+    from plyer import notification
+
+    HAS_PLYER = True
+except ImportError:
+    HAS_PLYER = False
 
 
 class DropTargetFrame(QFrame):
+    """
+    QFrame yang dimodifikasi untuk menerima operasi seret-dan-lepas (Drag & Drop)
+    secara presisi. Eksklusif hanya bereaksi terhadap file ber-ekstensi '.locked'.
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("DropArea")
@@ -31,6 +47,7 @@ class DropTargetFrame(QFrame):
         self.on_file_dropped = None
 
     def _set_drag_state(self, state: bool):
+        """Memanipulasi QSS Property untuk reaktivitas UI berbasis status drag kursor."""
         self.setProperty("dragActive", state)
         self.style().unpolish(self)
         self.style().polish(self)
@@ -48,6 +65,7 @@ class DropTargetFrame(QFrame):
         self._set_drag_state(False)
 
     def dropEvent(self, event):
+        """Menyelesaikan alur Drag-and-Drop jika format file tervalidasi benar."""
         self._set_drag_state(False)
         for url in event.mimeData().urls():
             path = url.toLocalFile()
@@ -58,6 +76,10 @@ class DropTargetFrame(QFrame):
 
 
 class TabBuka(QWidget):
+    """
+    Kelas Widget penampung untuk fungsionalitas Dekripsi.
+    """
+
     def __init__(self):
         super().__init__()
         self._path_file = None
@@ -66,6 +88,7 @@ class TabBuka(QWidget):
         self._build_ui()
 
     def _build_ui(self):
+        """Membangun layout hierarkis serta mengikat event listener UI."""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(20)
@@ -73,7 +96,7 @@ class TabBuka(QWidget):
         h_container = QHBoxLayout()
         h_container.setSpacing(20)
 
-        # --- KOLOM KIRI ---
+        # --- KOLOM KIRI (Seleksi File Brankas) ---
         self.card_file = DropTargetFrame()
         apply_shadow(self.card_file, blur_radius=30, opacity=40)
         self.card_file.on_file_dropped = self._set_file
@@ -87,13 +110,18 @@ class TabBuka(QWidget):
         v_left.addWidget(lbl_title_file)
 
         row_browse = QHBoxLayout()
-        self.btn_browse = QPushButton("\ue8a5  Browse .locked")
-        self.btn_browse.setStyleSheet("font-family: 'Segoe UI', 'Segoe MDL2 Assets';")
+        self.btn_browse = QPushButton(" Browse .locked")
+        self.btn_browse.setIcon(qta.icon("mdi6.file-find", color="white"))
+        self.btn_browse.setIconSize(QSize(20, 20))
         self.btn_browse.setFixedHeight(45)
         self.btn_browse.clicked.connect(self._pilih_file)
         row_browse.addWidget(self.btn_browse)
 
-        self.btn_clear = QPushButton("\ue8bb")
+        self.btn_clear = QPushButton()
+        self.btn_clear.setIcon(
+            qta.icon("mdi6.close", color="#8B95A5", color_active="white")
+        )
+        self.btn_clear.setIconSize(QSize(20, 20))
         self.btn_clear.setObjectName("BtnGhost")
         self.btn_clear.setFixedSize(45, 45)
         self.btn_clear.clicked.connect(self._clear_file)
@@ -109,7 +137,7 @@ class TabBuka(QWidget):
         v_left.addWidget(self.lbl_path, 1)
         h_container.addWidget(self.card_file, 1)
 
-        # --- KOLOM KANAN ---
+        # --- KOLOM KANAN (Formulir Dekripsi) ---
         col_right = QVBoxLayout()
         card_pw = QFrame()
         card_pw.setObjectName("Card")
@@ -124,7 +152,6 @@ class TabBuka(QWidget):
         v_pw.addWidget(lbl_title_pw)
         v_pw.addSpacing(10)
 
-        # Menggunakan struktur InputBox (Ikon Mata Terintegrasi di dalam)
         box_pw = QFrame()
         box_pw.setObjectName("InputBox")
         lay_box = QHBoxLayout(box_pw)
@@ -136,11 +163,13 @@ class TabBuka(QWidget):
         self.entry_pw.setFixedHeight(45)
         self.entry_pw.setPlaceholderText("Ketik password di sini…")
         self.entry_pw.setEchoMode(QLineEdit.EchoMode.Password)
-        self.entry_pw.textChanged.connect(self._validate_state)
+        self.entry_pw.textChanged.connect(self._on_pw_change)
         self.entry_pw.returnPressed.connect(self._proses)
         lay_box.addWidget(self.entry_pw)
 
-        self.btn_toggle_pw = QPushButton("\ue18b")
+        self.btn_toggle_pw = QPushButton()
+        self.btn_toggle_pw.setIcon(qta.icon("mdi6.eye-outline", color="#8B95A5"))
+        self.btn_toggle_pw.setIconSize(QSize(22, 22))
         self.btn_toggle_pw.setObjectName("BtnEye")
         self.btn_toggle_pw.setFixedSize(40, 45)
         self.btn_toggle_pw.clicked.connect(self._toggle_pw)
@@ -153,19 +182,21 @@ class TabBuka(QWidget):
 
         main_layout.addLayout(h_container)
 
-        # --- ACTION AREA ---
-        self.notif = AnimatedNotifBar()
-        main_layout.addWidget(self.notif)
-
+        # --- BOTTOM ACTION BAR ---
         self.btn_aksi = BigActionBtn(
-            "BUKA BRANKAS", "Masukkan password untuk membuka kunci", icon="\ue785"
+            "BUKA BRANKAS",
+            "Masukkan password untuk membuka kunci",
+            icon_name="mdi6.lock-open-variant",
         )
         self.btn_aksi.setEnabled(False)
         self.btn_aksi.clicked.connect(self._proses)
         apply_shadow(self.btn_aksi, blur_radius=20, y_offset=4, opacity=80)
         main_layout.addWidget(self.btn_aksi)
 
+        self.notif = AnimatedNotifBar(self)
+
     def _toggle_pw(self):
+        """Melakukan toggle fungsionalitas 'Buka Kacamata' pada widget sandi."""
         mode = (
             QLineEdit.EchoMode.Normal
             if self.entry_pw.echoMode() == QLineEdit.EchoMode.Password
@@ -173,18 +204,31 @@ class TabBuka(QWidget):
         )
         self.entry_pw.setEchoMode(mode)
 
-        # Animasi warna ikon Eye saat diklik
         color = "#00D2C8" if mode == QLineEdit.EchoMode.Normal else "#8B95A5"
-        self.btn_toggle_pw.setStyleSheet(f"color: {color};")
+        icon_name = (
+            "mdi6.eye-outline"
+            if mode == QLineEdit.EchoMode.Password
+            else "mdi6.eye-off-outline"
+        )
+        self.btn_toggle_pw.setIcon(qta.icon(icon_name, color=color))
+
+    def _on_pw_change(self):
+        """Memproses sinyal ketika ada pengetikan di kolom password."""
+        self.notif.hide_msg()
+        self._validate_state()
 
     def _validate_state(self):
-        self.notif.hide_msg()
+        """Logika validasi untuk menyorot atau meredupkan tombol konfirmasi."""
         if not self._konfirmasi_timpa:
             self.btn_aksi.setEnabled(
                 self._path_file is not None and bool(self.entry_pw.text())
             )
 
     def _set_file(self, path: str):
+        """
+        Menyimpan file terkunci ke dalam memori aplikasi dengan merespons ukuran font/widget
+        secara dinamis (Text Elision) agar tulisan URL yang panjang tidak merusak tata letak.
+        """
         self._path_file = path
         metrics = QFontMetrics(self.lbl_path.font())
         available_width = self.lbl_path.width() - 24
@@ -202,6 +246,7 @@ class TabBuka(QWidget):
         self._validate_state()
 
     def _clear_file(self):
+        """Mereset komponen file menjadi keadaan tidak terisi/kosong."""
         self._path_file = None
         self.lbl_path.setText("File belum dipilih\n\natau seret file .locked ke sini")
         self.lbl_path.setToolTip("")
@@ -211,6 +256,7 @@ class TabBuka(QWidget):
         self._validate_state()
 
     def _pilih_file(self):
+        """Pelatuk untuk menampilkan jendela penjelajah OS native (Mencari file brankas)."""
         f, _ = QFileDialog.getOpenFileName(
             self, "Pilih File Brankas", "", "Locked Files (*.locked)"
         )
@@ -218,12 +264,14 @@ class TabBuka(QWidget):
             self._set_file(f)
 
     def _reset_timpa(self):
+        """Mereset intervensi paksa jika pengguna memilih file yang rentan tumpang tindih."""
         self._konfirmasi_timpa = False
         self.btn_aksi.setTextLabels(
             "BUKA BRANKAS", "Masukkan password untuk membuka kunci"
         )
 
     def _proses(self):
+        """Inisiasi utas QThread asinkron yang meluncurkan proses dekripsi berkas AES-256."""
         if self.worker is not None and self.worker.isRunning():
             return
         force = self._konfirmasi_timpa
@@ -246,6 +294,7 @@ class TabBuka(QWidget):
         self.worker.start()
 
     def _set_busy(self, busy: bool):
+        """Sinkronisasi blokade form untuk mencegah intervensi dobel di satu layar UI."""
         self.btn_aksi.setEnabled(not busy)
         self.btn_browse.setEnabled(not busy)
         if busy:
@@ -257,17 +306,35 @@ class TabBuka(QWidget):
             self._validate_state()
 
     def _on_selesai(self, result):
-        self._set_busy(False)
+        """Aksi terminal setelah proses latar belakang utas diselesaikan."""
+        self.worker = None
         status, msg = result
+
+        if status == "SUCCESS":
+            self.entry_pw.blockSignals(True)
+            self.entry_pw.clear()
+            self.entry_pw.blockSignals(False)
+            self._clear_file()
+
+        self._set_busy(False)
 
         if status == "SUCCESS":
             self.notif.show_msg(
                 "ok", f"Folder/File '{msg}' berhasil dikembalikan!", 6000
             )
-            self.entry_pw.clear()
-            self._clear_file()
+            logger.info(f"Dekripsi sukses: {msg}")
+            if HAS_PLYER and notification:
+                try:
+                    notification.notify(
+                        title="Digital Locker",
+                        message=f"Brankas '{msg}' berhasil dibuka.",
+                        timeout=5,
+                    )
+                except:
+                    pass
         elif status == "WRONG_PW":
             self.notif.show_msg("err", "Password salah! Coba lagi.")
+            logger.warning("Upaya dekripsi gagal: Password salah.")
         elif status == "OVERWRITE":
             self._konfirmasi_timpa = True
             self.btn_aksi.setTextLabels(
@@ -276,5 +343,14 @@ class TabBuka(QWidget):
             self.btn_aksi.setEnabled(True)
             self.notif.show_msg("warn", f"'{msg}' sudah ada! Klik lagi untuk menimpa.")
         else:
-            log.error("Error: %s", msg)
+            logger.error(f"Error dekripsi: {msg}")
             self.notif.show_msg("err", f"Error: {msg}", 8000)
+            if HAS_PLYER and notification:
+                try:
+                    notification.notify(
+                        title="Digital Locker - Error",
+                        message="Terjadi kesalahan saat membuka brankas.",
+                        timeout=5,
+                    )
+                except:
+                    pass

@@ -179,7 +179,7 @@ class DecryptingStream:
     def _update_progress(self, bytes_added):
         self.bytes_read_so_far += bytes_added
         # Skala progress ke 0.95 (5% sisa untuk proses shutil di tahap akhir)
-        pct = min(0.95, 0.80 * (self.bytes_read_so_far / (self.total_len or 1)))
+        pct = min(0.95, 0.05 + 0.90 * (self.bytes_read_so_far / (self.total_len or 1)))
         if pct - self._last_pct >= 0.005:
             safe_cb(self.progress_cb, pct)
             self._last_pct = pct
@@ -360,7 +360,7 @@ def buka_brankas(
             try:
                 # Eksekusi ekstraksi secara Streaming
                 with tarfile.open(fileobj=in_stream, mode="r|") as tar:
-                    tar.extractall(path=temp_ext_dir)
+                    tar.extractall(path=temp_ext_dir, filter="data")
 
                 # Drain sisa bytes untuk memastikan finalize() terpanggil dan AES-GCM divalidasi
                 in_stream.read()

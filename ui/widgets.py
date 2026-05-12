@@ -1,8 +1,10 @@
 """
-ui/widgets.py
-Membuat Custom Title Bar, Shadow, dan Tombol Vektor raksasa.
+Modul: widgets.py
+Deskripsi: Berisi kumpulan komponen UI (Widget) kustom.
+           Ditambahkan 'ModernMessageBox' untuk menggantikan pop-up Windows bawaan.
 """
 
+import qtawesome as qta
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -10,14 +12,28 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QGraphicsDropShadowEffect,
     QPushButton,
+    QDialog,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QPropertyAnimation, QEasingCurve, QTimer
+from PySide6.QtCore import (
+    Qt,
+    QThread,
+    Signal,
+    QPropertyAnimation,
+    QEasingCurve,
+    QTimer,
+    QSize,
+    QPoint,
+)
 from PySide6.QtGui import QColor
 
 from .styles import CLR_INNER, CLR_BORDER
 
 
 def apply_shadow(widget, blur_radius=20, y_offset=6, opacity=60):
+    """
+    Memberikan efek bayangan (Drop Shadow) pada widget target.
+    Menciptakan kesan elevasi visual (melayang) ala desain UI modern.
+    """
     shadow = QGraphicsDropShadowEffect()
     shadow.setBlurRadius(blur_radius)
     shadow.setXOffset(0)
@@ -26,9 +42,82 @@ def apply_shadow(widget, blur_radius=20, y_offset=6, opacity=60):
     widget.setGraphicsEffect(shadow)
 
 
-class CustomTitleBar(QFrame):
-    """Baris judul (Title bar) kustom untuk menggantikan bawaan Windows."""
+# --- KOMPONEN BARU: MODERN MESSAGE BOX ---
+class ModernMessageBox(QDialog):
+    """
+    Custom Dialog berdesain modern (Frameless & Dark Mode)
+    untuk menggantikan QMessageBox bawaan OS yang terlihat kaku dan putih.
+    """
 
+    def __init__(
+        self, title, message, icon_name="mdi6.alert", icon_color="#F39C12", parent=None
+    ):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedWidth(420)
+
+        # Container utama dengan gaya 'Card' (warna biru gelap & melengkung)
+        container = QFrame(self)
+        container.setObjectName("Card")
+        apply_shadow(container, blur_radius=30, y_offset=8, opacity=60)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.addWidget(container)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(15)
+
+        # Judul Pop-up
+        lbl_title = QLabel(title)
+        lbl_title.setStyleSheet("font-weight: 800; font-size: 12pt; color: white;")
+        layout.addWidget(lbl_title)
+
+        # Area Konten (Ikon + Pesan)
+        content_lay = QHBoxLayout()
+        content_lay.setSpacing(15)
+
+        lbl_icon = QLabel()
+        lbl_icon.setPixmap(qta.icon(icon_name, color=icon_color).pixmap(36, 36))
+        content_lay.addWidget(lbl_icon, alignment=Qt.AlignmentFlag.AlignTop)
+
+        lbl_msg = QLabel(message)
+        lbl_msg.setWordWrap(True)
+        lbl_msg.setStyleSheet("color: #8B95A5; font-size: 10pt; line-height: 1.4;")
+        content_lay.addWidget(lbl_msg, 1)
+
+        layout.addLayout(content_lay)
+        layout.addSpacing(10)
+
+        # Area Tombol Aksi
+        btn_lay = QHBoxLayout()
+        btn_lay.setSpacing(12)
+        btn_lay.addStretch()
+
+        self.btn_cancel = QPushButton("Batal")
+        self.btn_cancel.setFixedSize(90, 36)
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel.clicked.connect(self.reject)  # Tolak / Tutup dialog
+
+        self.btn_yes = QPushButton("Ya, Hapus")
+        self.btn_yes.setFixedSize(110, 36)
+        self.btn_yes.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Styling spesifik tombol bahaya (merah)
+        self.btn_yes.setStyleSheet("""
+            QPushButton { background-color: #E74C3C; color: white; border: none; border-radius: 8px; font-weight: bold; }
+            QPushButton:hover { background-color: #C0392B; }
+        """)
+        self.btn_yes.clicked.connect(self.accept)  # Terima / Lanjut
+
+        btn_lay.addWidget(self.btn_cancel)
+        btn_lay.addWidget(self.btn_yes)
+        layout.addLayout(btn_lay)
+
+
+# --- KOMPONEN LAMA (CustomTitleBar, BigActionBtn, dll) ---
+class CustomTitleBar(QFrame):
     def __init__(self, parent):
         super().__init__(parent)
         self.parent_window = parent
@@ -39,47 +128,51 @@ class CustomTitleBar(QFrame):
         lay.setContentsMargins(15, 0, 0, 0)
         lay.setSpacing(10)
 
-        lbl_icon = QLabel("\ue72e")  # Ikon gembok kecil
-        lbl_icon.setObjectName("Icon")
-        lbl_icon.setStyleSheet("color: #00D2C8; font-size: 10pt;")
+        self.lbl_icon = QLabel()
+        self.lbl_icon.setPixmap(qta.icon("mdi6.lock", color="#00D2C8").pixmap(14, 14))
 
         lbl_title = QLabel("Digital Locker — Professional")
         lbl_title.setStyleSheet("color: #8B95A5; font-size: 9pt;")
 
-        lay.addWidget(lbl_icon)
+        lay.addWidget(self.lbl_icon)
         lay.addWidget(lbl_title)
         lay.addStretch()
 
-        # Window Controls
-        btn_min = QPushButton("\ue921")
-        btn_min.setObjectName("BtnGhost")
-        btn_min.setFixedSize(40, 32)
-        btn_min.clicked.connect(self.parent_window.showMinimized)
+        self.btn_min = QPushButton()
+        self.btn_min.setIcon(qta.icon("mdi6.minus", color="#8B95A5"))
+        self.btn_min.setObjectName("BtnGhost")
+        self.btn_min.setFixedSize(40, 32)
+        self.btn_min.clicked.connect(self.parent_window.showMinimized)
 
-        btn_max = QPushButton("\ue922")
-        btn_max.setObjectName("BtnGhost")
-        btn_max.setFixedSize(40, 32)
-        btn_max.clicked.connect(self._toggle_maximize)
+        self.btn_max = QPushButton()
+        self.btn_max.setIcon(qta.icon("mdi6.window-maximize", color="#8B95A5"))
+        self.btn_max.setObjectName("BtnGhost")
+        self.btn_max.setFixedSize(40, 32)
+        self.btn_max.clicked.connect(self._toggle_maximize)
 
-        btn_close = QPushButton("\ue8bb")
-        btn_close.setObjectName("BtnGhost")
-        btn_close.setFixedSize(40, 32)
-        btn_close.setStyleSheet(
-            "QPushButton#BtnGhost:hover { background-color: #E74C3C; color: white; border-radius: 0; }"
+        self.btn_close = QPushButton()
+        self.btn_close.setIcon(
+            qta.icon("mdi6.close", color="#8B95A5", color_active="white")
         )
-        btn_close.clicked.connect(self.parent_window.close)
+        self.btn_close.setObjectName("BtnGhost")
+        self.btn_close.setFixedSize(40, 32)
+        self.btn_close.setStyleSheet(
+            "QPushButton#BtnGhost:hover { background-color: #E74C3C; border-radius: 0; }"
+        )
+        self.btn_close.clicked.connect(self.parent_window.close)
 
-        lay.addWidget(btn_min)
-        lay.addWidget(btn_max)
-        lay.addWidget(btn_close)
+        lay.addWidget(self.btn_min)
+        lay.addWidget(self.btn_max)
+        lay.addWidget(self.btn_close)
 
     def _toggle_maximize(self):
         if self.parent_window.isMaximized():
             self.parent_window.showNormal()
+            self.btn_max.setIcon(qta.icon("mdi6.window-maximize", color="#8B95A5"))
         else:
             self.parent_window.showMaximized()
+            self.btn_max.setIcon(qta.icon("mdi6.window-restore", color="#8B95A5"))
 
-    # Memungkinkan window di-drag dari Title Bar
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.drag_pos = event.globalPosition().toPoint()
@@ -92,20 +185,18 @@ class CustomTitleBar(QFrame):
 
 
 class BigActionBtn(QPushButton):
-    """Tombol Gradient raksasa dengan Ikon Vektor Segoe MDL2."""
-
-    def __init__(self, title, subtitle, icon="\ue72e", parent=None):  # Default: Gembok
+    def __init__(self, title, subtitle, icon_name="mdi6.lock", parent=None):
         super().__init__(parent)
         self.setObjectName("BtnAksiBesar")
         self.setFixedHeight(75)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.icon_name = icon_name
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(25, 10, 25, 10)
 
-        self.lbl_icon = QLabel(icon)
-        self.lbl_icon.setObjectName("Icon")
-        self.lbl_icon.setStyleSheet("font-size: 20pt; color: white;")
+        self.lbl_icon = QLabel()
+        self.lbl_icon.setPixmap(qta.icon(self.icon_name, color="white").pixmap(32, 32))
 
         v_lay = QVBoxLayout()
         v_lay.setSpacing(2)
@@ -120,9 +211,10 @@ class BigActionBtn(QPushButton):
         v_lay.addWidget(self.lbl_title)
         v_lay.addWidget(self.lbl_sub)
 
-        self.lbl_arrow = QLabel("\ue72a")  # Ikon Panah Kanan Vektor
-        self.lbl_arrow.setObjectName("Icon")
-        self.lbl_arrow.setStyleSheet("font-size: 16pt; color: white;")
+        self.lbl_arrow = QLabel()
+        self.lbl_arrow.setPixmap(
+            qta.icon("mdi6.chevron-right", color="white").pixmap(24, 24)
+        )
 
         lay.addWidget(self.lbl_icon)
         lay.addSpacing(15)
@@ -133,15 +225,21 @@ class BigActionBtn(QPushButton):
     def setEnabled(self, val):
         super().setEnabled(val)
         opacity = "1.0" if val else "0.3"
-        color_val = f"rgba(255,255,255,{opacity})"
+        color_val = "white" if val else "rgba(255,255,255,0.3)"
+
+        self.lbl_icon.setPixmap(
+            qta.icon(self.icon_name, color=color_val).pixmap(32, 32)
+        )
+        self.lbl_arrow.setPixmap(
+            qta.icon("mdi6.chevron-right", color=color_val).pixmap(24, 24)
+        )
+
         self.lbl_title.setStyleSheet(
-            f"font-size: 13pt; font-weight: 800; color: {color_val};"
+            f"font-size: 13pt; font-weight: 800; color: rgba(255,255,255,{opacity});"
         )
         self.lbl_sub.setStyleSheet(
             f"font-size: 9pt; color: rgba(255,255,255,{float(opacity)*0.75});"
         )
-        self.lbl_icon.setStyleSheet(f"font-size: 20pt; color: {color_val};")
-        self.lbl_arrow.setStyleSheet(f"font-size: 16pt; color: {color_val};")
 
     def setTextLabels(self, title, subtitle=""):
         self.lbl_title.setText(title)
@@ -173,51 +271,116 @@ class CryptoWorker(QThread):
 class AnimatedNotifBar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(0)
-        self.setStyleSheet("background-color: transparent; border-radius: 6px;")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        self.lbl = QLabel("")
-        self.lbl.setObjectName("Icon")  # Memungkinkan mixing teks dan ikon
-        self.lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl.setWordWrap(True)
-        layout.addWidget(self.lbl)
+        self.setFixedWidth(380)
+        self.setMinimumHeight(55)
+        self.setStyleSheet("background-color: transparent; border-radius: 8px;")
 
-        self.anim = QPropertyAnimation(self, b"maximumHeight")
-        self.anim.setDuration(300)
-        self.anim.setEasingCurve(QEasingCurve.Type.OutQuint)
+        apply_shadow(self, blur_radius=30, y_offset=10, opacity=60)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(12)
+
+        self.lbl_icon = QLabel()
+        self.lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.lbl_text = QLabel("")
+        self.lbl_text.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        )
+        self.lbl_text.setWordWrap(True)
+
+        self.btn_close = QPushButton()
+        self.btn_close.setIcon(
+            qta.icon("mdi6.close", color="#8B95A5", color_active="white")
+        )
+        self.btn_close.setIconSize(QSize(18, 18))
+        self.btn_close.setFixedSize(24, 24)
+        self.btn_close.setStyleSheet("background: transparent; border: none;")
+        self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_close.clicked.connect(self.hide_msg)
+
+        layout.addWidget(self.lbl_icon)
+        layout.addWidget(self.lbl_text, 1)
+        layout.addWidget(self.btn_close, alignment=Qt.AlignmentFlag.AlignTop)
+
+        self.anim = QPropertyAnimation(self, b"pos")
+        self.anim.setDuration(400)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutBack)
+        self.anim.finished.connect(self._on_anim_finished)
+
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.hide_msg)
 
-    def show_msg(self, kind: str, msg: str, auto_hide_ms: int = 0):
+        self.hide()
+
+    def _on_anim_finished(self):
+        if self.pos().y() < 0:
+            self.hide()
+
+    def show_msg(self, kind: str, msg: str, auto_hide_ms: int = 4000):
         self.timer.stop()
+        self.anim.stop()
+
         bg_color = (
             "#0D2B1E" if kind == "ok" else ("#2B0D0D" if kind == "err" else "#2B1E0D")
         )
         fg_color = (
             "#00D2C8" if kind == "ok" else ("#E74C3C" if kind == "err" else "#F39C12")
         )
-        icon = (
-            "\ue73e" if kind == "ok" else ("\uea39" if kind == "err" else "\ue7ba")
-        )  # Ikon vektor
+        icon_name = (
+            "mdi6.check-circle"
+            if kind == "ok"
+            else ("mdi6.close-circle" if kind == "err" else "mdi6.alert-circle")
+        )
 
         self.setStyleSheet(
-            f"background-color: {bg_color}; border-radius: 6px; border: 1px solid {CLR_BORDER};"
+            f"background-color: {bg_color}; border-radius: 8px; border: 1px solid {CLR_BORDER};"
         )
-        self.lbl.setStyleSheet(
-            f"color: {fg_color}; font-weight: bold; font-family: 'Segoe UI', 'Segoe MDL2 Assets';"
+        self.lbl_icon.setPixmap(qta.icon(icon_name, color=fg_color).pixmap(24, 24))
+        self.lbl_text.setStyleSheet(
+            f"color: {fg_color}; font-weight: bold; font-size: 10pt;"
         )
-        self.lbl.setText(f"{icon}  {msg}")
+        self.lbl_text.setText(msg)
 
-        self.anim.setStartValue(self.height())
-        self.anim.setEndValue(45)
+        self.raise_()
+        self.show()
+
+        if self.parentWidget():
+            p_rect = self.parentWidget().rect()
+            target_x = p_rect.width() - self.width() - 20
+            target_y = 20
+            start_y = -self.height() - 20
+        else:
+            target_x = 20
+            target_y = 20
+            start_y = -100
+
+        if not self.isVisible() or self.pos().y() < 0:
+            self.anim.setStartValue(QPoint(target_x, start_y))
+        else:
+            self.anim.setStartValue(self.pos())
+
+        self.anim.setEndValue(QPoint(target_x, target_y))
         self.anim.start()
+
         if auto_hide_ms > 0:
             self.timer.start(auto_hide_ms)
 
     def hide_msg(self):
         self.timer.stop()
-        self.anim.setStartValue(self.height())
-        self.anim.setEndValue(0)
+        if not self.isVisible() or self.pos().y() < 0:
+            return
+
+        if self.parentWidget():
+            target_x = self.pos().x()
+            target_y = -self.height() - 20
+        else:
+            target_x = 20
+            target_y = -100
+
+        self.anim.stop()
+        self.anim.setStartValue(self.pos())
+        self.anim.setEndValue(QPoint(target_x, target_y))
         self.anim.start()

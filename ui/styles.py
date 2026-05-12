@@ -1,6 +1,8 @@
 """
-ui/styles.py
-Tema UI Modern Dark Mode (Cyber Teal/Cyan) Presisi 100%.
+Modul: styles.py
+Deskripsi: Mendefinisikan palet warna konstan dan stylesheet (QSS) utama untuk aplikasi.
+           Menggunakan tema "Solid Dark Mode" (Cyber Teal/Cyan).
+           FIX: Scrollbar dikustomisasi penuh dan tambahan class ListItem untuk separator.
 """
 
 CLR_BG = "#0B101E"
@@ -14,10 +16,19 @@ CLR_TEXT_MUTED = "#8B95A5"
 
 
 def load_stylesheet() -> str:
+    """
+    Menghasilkan string Qt Style Sheet (QSS) untuk di-apply ke Main Window.
+    """
     return f"""
     /* --- GLOBAL --- */
-    QWidget {{ 
+    QMainWindow {{
+        background-color: transparent; 
+    }}
+    
+    QWidget#CentralWidget {{
         background-color: {CLR_BG}; 
+    }}
+    QWidget {{ 
         color: {CLR_TEXT_MAIN}; 
         font-family: 'Segoe UI', sans-serif; 
         font-size: 10pt; 
@@ -44,18 +55,31 @@ def load_stylesheet() -> str:
         border: 2px dashed {CLR_ACCENT}; 
         background-color: {CLR_INNER}; 
     }}
-    QFrame#Inner {{ 
+    
+    #Inner {{ 
         background-color: {CLR_INNER}; 
         border-radius: 8px; 
         border: 1px solid {CLR_BORDER}; 
     }}
+    
+    /* --- LIST ITEM (SEPARATOR) --- */
+    QFrame#ListItem {{
+        background-color: transparent;
+        border: none;
+        border-bottom: 1px solid {CLR_BORDER}; /* Garis pemisah bawah */
+        border-radius: 0px;
+    }}
+    QFrame#ListItem:hover {{
+        background-color: rgba(35, 43, 62, 0.5); /* Efek highlight saat mouse lewat */
+    }}
+    
     QFrame#TipsBox {{
         background-color: #0E1A24;
         border: 1px solid #142E3B;
         border-radius: 8px;
     }}
     
-    /* --- HEADER & TABS (Segmented Control) --- */
+    /* --- HEADER & TABS --- */
     QFrame#TabContainer {{
         background-color: {CLR_CARD};
         border-radius: 10px;
@@ -87,7 +111,7 @@ def load_stylesheet() -> str:
     QLabel#CardTitle {{ font-size: 11pt; font-weight: 800; color: {CLR_TEXT_MAIN}; letter-spacing: 0.5px; text-transform: uppercase; }}
     QLabel#CardSubtitle {{ font-size: 9pt; color: {CLR_TEXT_MUTED}; margin-bottom: 5px; }}
     
-    /* --- INPUTS (Dengan Ikon Di Dalamnya) --- */
+    /* --- INPUTS --- */
     QFrame#InputBox {{
         background-color: {CLR_INNER}; 
         border: 1px solid {CLR_BORDER};
@@ -104,13 +128,8 @@ def load_stylesheet() -> str:
         background-color: transparent;
         border: none;
         color: {CLR_TEXT_MUTED};
-        font-family: 'Segoe MDL2 Assets', sans-serif;
-        font-size: 12pt;
-        padding: 0px; /* FIX 4: Menghilangkan padding bawaan global agar ikon tidak kegencet */
+        padding: 0px; 
         margin: 0px;
-    }}
-    QPushButton#BtnEye:hover {{
-        color: {CLR_TEXT_MAIN};
     }}
     QLabel#IconInside {{
         background-color: transparent;
@@ -128,10 +147,9 @@ def load_stylesheet() -> str:
     
     QPushButton#BtnGhost {{ 
         background-color: transparent; border: none; color: {CLR_TEXT_MUTED}; 
-        font-size: 12pt; padding: 0; 
-        font-family: 'Segoe MDL2 Assets', sans-serif;
+        padding: 0; 
     }}
-    QPushButton#BtnGhost:hover {{ color: {CLR_TEXT_MAIN}; background-color: {CLR_BORDER}; border-radius: 8px; }}
+    QPushButton#BtnGhost:hover {{ background-color: {CLR_BORDER}; border-radius: 8px; }}
     
     /* --- BIG ACTION BUTTON --- */
     QPushButton#BtnAksiBesar {{
@@ -143,7 +161,7 @@ def load_stylesheet() -> str:
         background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00EFE5, stop:1 #00A69D);
     }}
     QPushButton#BtnAksiBesar:disabled {{
-        background-color: #151C2C;
+        background-color: rgba(21, 28, 44, 0.8);
         border: 1px solid {CLR_BORDER};
     }}
     
@@ -153,8 +171,28 @@ def load_stylesheet() -> str:
     QMenu::item:selected {{ background-color: {CLR_INNER}; }}
     
     QScrollArea {{ border: none; background-color: transparent; }}
-    QScrollBar:vertical {{ background: transparent; width: 6px; border-radius: 3px; margin: 0px; }}
-    QScrollBar::handle:vertical {{ background: {CLR_BORDER}; border-radius: 3px; min-height: 20px; }}
-    QScrollBar::handle:vertical:hover {{ background: {CLR_TEXT_MUTED}; }}
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+    QAbstractScrollArea::viewport {{ background-color: transparent; }}
+    
+    /* --- SCROLLBAR CUSTOMIZATION --- */
+    QScrollBar:vertical {{ 
+        background: transparent; 
+        width: 10px; 
+        margin: 2px; 
+    }}
+    QScrollBar::handle:vertical {{ 
+        background: {CLR_ACCENT_DK}; /* Warna Cyan menyatu tema */
+        border-radius: 4px; 
+        min-height: 30px; 
+    }}
+    QScrollBar::handle:vertical:hover {{ 
+        background: {CLR_ACCENT}; /* Cyan lebih cerah saat mouse hover */
+    }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ 
+        height: 0px; 
+        background: none; 
+    }}
+    /* Mematikan background trek putih bawakan Windows */
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ 
+        background: transparent; 
+    }}
     """

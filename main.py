@@ -1,33 +1,34 @@
 """
 main.py
-Entry point untuk menjalankan aplikasi Digital Locker (versi PySide6).
+Entry point Digital Locker dengan Loguru dan kapabilitas System Tray.
 """
 
 import os
 import sys
-import logging
+from loguru import logger
 from PySide6.QtWidgets import QApplication
 
-# FIX #4 — HiDPI harus diaktifkan via environment variable SEBELUM
-# QApplication dibuat, dan tidak dikunci di balik `sys.frozen` sehingga
-# juga aktif saat development, bukan hanya saat di-build dengan PyInstaller.
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
 os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 
-# FIX #10 — Tambahkan logging dasar agar error dari core/vault.py
-# tercatat ke file, bukan hanya tampil di UI (memudahkan debugging).
-logging.basicConfig(
-    filename="digital_locker.log",
-    level=logging.ERROR,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+# Setup Loguru: Rotasi log otomatis jika melebihi 10MB
+logger.add(
+    "digital_locker.log",
+    rotation="10 MB",
+    level="INFO",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {module}:{function} - {message}",
 )
 
-from ui.app import AppBrankas  # noqa: E402 — import setelah env vars di-set
+from ui.app import AppBrankas
 
 
 def main():
     app = QApplication(sys.argv)
+
+    # Mencegah aplikasi terbunuh total (exit) ketika window ditutup (X).
+    # Agar bisa berjalan terus di System Tray (background).
+    app.setQuitOnLastWindowClosed(False)
+
     window = AppBrankas()
     window.show()
     sys.exit(app.exec())

@@ -1,11 +1,14 @@
 """
-ui/tab_kunci.py
-Perbaikan Spasi (margin dihilangkan untuk presisi) & Ikon Input.
+Modul: tab_kunci.py
+Deskripsi: Antarmuka untuk Tab "Kunci Folder". Menangani interaksi pengguna terkait
+           pemilihan file/folder target, validasi zxcvbn, dan inisiasi utas enkripsi.
+           Menerapkan dialog kustom ModernMessageBox menggantikan QMessageBox OS.
 """
 
 import os
-import re
-import logging
+from loguru import logger
+import qtawesome as qta
+from zxcvbn import zxcvbn
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -18,31 +21,45 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QScrollArea,
     QMenu,
-    QMessageBox,
+    QDialog,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 
 from core.vault import kunci_brankas
-from .widgets import CryptoWorker, AnimatedNotifBar, apply_shadow, BigActionBtn
 
-log = logging.getLogger(__name__)
+# FIX: Import ModernMessageBox yang baru kita buat
+from .widgets import (
+    CryptoWorker,
+    AnimatedNotifBar,
+    apply_shadow,
+    BigActionBtn,
+    ModernMessageBox,
+)
+
+notification = None
+try:
+    from plyer import notification
+
+    HAS_PLYER = True
+except ImportError:
+    HAS_PLYER = False
 
 
 def pw_strength(pw: str) -> int:
     if not pw:
         return -1
-    score = 0
-    if len(pw) >= 8:
-        score += 1
-    if re.search(r"[A-Z]", pw) and re.search(r"[a-z]", pw):
-        score += 1
-    if re.search(r"\d", pw):
-        score += 1
-    if re.search(r"[!@#$%^&*()\-_=+\[\]{};:'\",.<>/?\\|`~]", pw):
-        score += 1
-    if pw and (max(pw.count(c) for c in set(pw)) / len(pw)) > 0.5:
-        score = max(0, score - 1)
-    return min(score, 3)
+
+    hasil = zxcvbn(pw)
+    skor_asli = hasil["score"]
+
+    if skor_asli <= 1:
+        return 0  # Lemah
+    elif skor_asli == 2:
+        return 1  # Cukup
+    elif skor_asli == 3:
+        return 2  # Kuat
+    else:
+        return 3  # Sangat Kuat
 
 
 STRENGTH_COLORS = ["#E74C3C", "#E67E22", "#00D2C8", "#00D2C8"]
@@ -96,7 +113,7 @@ class TabKunci(QWidget):
         h_cols = QHBoxLayout()
         h_cols.setSpacing(20)
 
-        # --- KOLOM KIRI ---
+        # --- KOLOM KIRI (Daftar File / Target) ---
         v_left = QVBoxLayout()
         self.card_target = MultiDropFrame()
         self.card_target.on_paths_dropped = self._add_paths
@@ -107,9 +124,10 @@ class TabKunci(QWidget):
         lay_target.setSpacing(15)
 
         row_hdr = QHBoxLayout()
-        icon_folder = QLabel("\ue8b7")
-        icon_folder.setObjectName("Icon")
-        icon_folder.setStyleSheet("font-size: 20pt; color: #F1C40F;")
+        icon_folder = QLabel()
+        icon_folder.setPixmap(
+            qta.icon("mdi6.folder-open", color="#F1C40F").pixmap(32, 32)
+        )
 
         v_hdr_text = QVBoxLayout()
         v_hdr_text.setSpacing(2)
@@ -124,7 +142,8 @@ class TabKunci(QWidget):
         row_hdr.addLayout(v_hdr_text)
         row_hdr.addStretch()
 
-        self.btn_add = QPushButton("\ue710  Tambah")
+        self.btn_add = QPushButton(" Tambah")
+        self.btn_add.setIcon(qta.icon("mdi6.plus", color="#8B95A5"))
         self.btn_add.setObjectName("BtnGhost")
         self.btn_add.setFixedSize(100, 36)
         self.btn_add.setStyleSheet(
@@ -132,26 +151,45 @@ class TabKunci(QWidget):
         )
 
         menu = QMenu(self)
-        menu.addAction("\ue8a5  File", self._pilih_file)
-        menu.addAction("\ue8b7  Folder", self._pilih_folder)
+        action_file = menu.addAction(" File")
+        action_file.setIcon(qta.icon("mdi6.file-document", color="white"))
+        action_file.triggered.connect(self._pilih_file)
+
+        action_folder = menu.addAction(" Folder")
+        action_folder.setIcon(qta.icon("mdi6.folder", color="white"))
+        action_folder.triggered.connect(self._pilih_folder)
+
         self.btn_add.setMenu(menu)
         row_hdr.addWidget(self.btn_add, alignment=Qt.AlignmentFlag.AlignTop)
         lay_target.addLayout(row_hdr)
 
+        self.inner_frame = QFrame()
+        self.inner_frame.setObjectName("Inner")
+        inner_lay = QVBoxLayout(self.inner_frame)
+        inner_lay.setContentsMargins(0, 5, 0, 5)
+
         self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("background: transparent; border: none;")
         self.list_container = QWidget()
+        self.list_container.setStyleSheet("background: transparent;")
+        self.list_container.setObjectName("ListContainer")
+
         self.list_layout = QVBoxLayout(self.list_container)
         self.list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.list_layout.setSpacing(0)
+        self.list_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_area.setWidget(self.list_container)
-        self.scroll_area.setWidgetResizable(True)
-        lay_target.addWidget(self.scroll_area, 1)
+
+        inner_lay.addWidget(self.scroll_area)
+        lay_target.addWidget(self.inner_frame, 1)
 
         v_left.addWidget(self.card_target, 1)
 
-        # Checkbox Hapus Asli (FIX 5 & 6)
+        # Checkbox konfirmasi penghapusan data asli
         lay_chk = QHBoxLayout()
         lay_chk.setContentsMargins(5, 5, 5, 0)
-        lay_chk.setSpacing(0)  # FIX: Matikan spasi otomatis bawaan layout
+        lay_chk.setSpacing(0)
 
         self.chk_hapus = QCheckBox()
         self.chk_hapus.setStyleSheet(
@@ -170,12 +208,12 @@ class TabKunci(QWidget):
         v_chk_txt.addWidget(lbl_chk_desc)
 
         lay_chk.addWidget(self.chk_hapus, alignment=Qt.AlignmentFlag.AlignTop)
-        lay_chk.addSpacing(10)  # Jarak eksak 10px setelah checkbox
+        lay_chk.addSpacing(10)
         lay_chk.addLayout(v_chk_txt)
         v_left.addLayout(lay_chk)
         h_cols.addLayout(v_left, 1)
 
-        # --- KOLOM KANAN ---
+        # --- KOLOM KANAN (Formulir Password) ---
         v_right = QVBoxLayout()
         card_pw = QFrame()
         card_pw.setObjectName("Card")
@@ -186,9 +224,9 @@ class TabKunci(QWidget):
         lay_pw.setSpacing(15)
 
         row_hdr_pw = QHBoxLayout()
-        icon_key = QLabel("\ue104")
-        icon_key.setObjectName("Icon")
-        icon_key.setStyleSheet("font-size: 20pt; color: #F39C12;")
+        icon_key = QLabel()
+        icon_key.setPixmap(qta.icon("mdi6.key-variant", color="#F39C12").pixmap(32, 32))
+
         v_hdr_pw_txt = QVBoxLayout()
         v_hdr_pw_txt.setSpacing(2)
         lbl_pw = QLabel("BUAT PASSWORD")
@@ -205,7 +243,6 @@ class TabKunci(QWidget):
 
         lay_pw.addSpacing(10)
 
-        # Input 1
         lbl_in1 = QLabel("Password")
         lbl_in1.setStyleSheet("font-weight: 600;")
         lay_pw.addWidget(lbl_in1)
@@ -223,15 +260,16 @@ class TabKunci(QWidget):
         self.entry_pw1.textChanged.connect(self._on_pw_change)
         lay_box1.addWidget(self.entry_pw1)
 
-        self.btn_toggle_pw = QPushButton("\ue18b")
+        self.btn_toggle_pw = QPushButton()
+        self.btn_toggle_pw.setIcon(qta.icon("mdi6.eye-outline", color="#8B95A5"))
+        self.btn_toggle_pw.setIconSize(QSize(22, 22))
         self.btn_toggle_pw.setObjectName("BtnEye")
-        self.btn_toggle_pw.setFixedSize(
-            40, 45
-        )  # Karena padding sudah 0, ikon tak akan kepotong
+        self.btn_toggle_pw.setFixedSize(40, 45)
         self.btn_toggle_pw.clicked.connect(self._toggle_pw)
         lay_box1.addWidget(self.btn_toggle_pw)
         lay_pw.addWidget(box_pw1)
 
+        # Indikator Segmen Kekuatan Sandi
         row_str = QHBoxLayout()
         row_str.setSpacing(8)
         self.str_bars = []
@@ -250,7 +288,6 @@ class TabKunci(QWidget):
 
         lay_pw.addSpacing(10)
 
-        # Input 2
         lbl_in2 = QLabel("Konfirmasi Password")
         lbl_in2.setStyleSheet("font-weight: 600;")
         lay_pw.addWidget(lbl_in2)
@@ -273,24 +310,21 @@ class TabKunci(QWidget):
         self.lbl_match.setObjectName("IconInside")
         self.lbl_match.setFixedSize(40, 45)
         self.lbl_match.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_match.setStyleSheet(
-            "font-family: 'Segoe MDL2 Assets'; font-size: 14pt; background: transparent;"
-        )
         lay_box2.addWidget(self.lbl_match)
         lay_pw.addWidget(box_pw2)
 
         lay_pw.addStretch()
 
-        # Tips Box (FIX 5 & 6)
         tips_box = QFrame()
         tips_box.setObjectName("TipsBox")
         lay_tips = QHBoxLayout(tips_box)
         lay_tips.setContentsMargins(15, 15, 15, 15)
-        lay_tips.setSpacing(0)  # FIX: Matikan spasi otomatis bawaan layout
+        lay_tips.setSpacing(0)
 
-        icon_shield = QLabel("\uea18")
-        icon_shield.setObjectName("Icon")
-        icon_shield.setStyleSheet("font-size: 20pt; color: #00D2C8;")
+        icon_shield = QLabel()
+        icon_shield.setPixmap(
+            qta.icon("mdi6.shield-check-outline", color="#00D2C8").pixmap(30, 30)
+        )
 
         v_tips = QVBoxLayout()
         v_tips.setSpacing(2)
@@ -305,7 +339,7 @@ class TabKunci(QWidget):
         v_tips.addWidget(lbl_tips_desc)
 
         lay_tips.addWidget(icon_shield, alignment=Qt.AlignmentFlag.AlignTop)
-        lay_tips.addSpacing(12)  # Jarak eksak 12px setelah tameng
+        lay_tips.addSpacing(12)
         lay_tips.addLayout(v_tips)
         lay_pw.addWidget(tips_box)
 
@@ -314,17 +348,15 @@ class TabKunci(QWidget):
         main_layout.addLayout(h_cols)
 
         # --- BOTTOM ACTION BAR ---
-        self.notif = AnimatedNotifBar()
-        main_layout.addWidget(self.notif)
-
         self.btn_aksi = BigActionBtn(
-            "KUNCI SEKARANG", "Proses penguncian akan dimulai", icon="\ue72e"
+            "KUNCI SEKARANG", "Proses penguncian akan dimulai", icon_name="mdi6.lock"
         )
         self.btn_aksi.setEnabled(False)
         self.btn_aksi.clicked.connect(self._proses)
         apply_shadow(self.btn_aksi, blur_radius=20, y_offset=4, opacity=80)
         main_layout.addWidget(self.btn_aksi)
 
+        self.notif = AnimatedNotifBar(self)
         self._render_list()
 
     def _pilih_folder(self):
@@ -339,6 +371,13 @@ class TabKunci(QWidget):
 
     def _add_paths(self, new_paths):
         for p in new_paths:
+            if p.lower().endswith(".locked"):
+                self.notif.show_msg(
+                    "warn",
+                    f"⚠ '{os.path.basename(p)}' sudah merupakan file brankas!",
+                    4000,
+                )
+                continue
             if p not in self._paths:
                 self._paths.append(p)
         self._render_list()
@@ -366,16 +405,14 @@ class TabKunci(QWidget):
 
         for p in self._paths:
             row = QFrame()
-            row.setObjectName("Inner")
+            row.setObjectName("ListItem")
             row.setFixedHeight(56)
             r_lay = QHBoxLayout(row)
             r_lay.setContentsMargins(15, 0, 15, 0)
 
-            ikon = QLabel("\ue8a5" if os.path.isfile(p) else "\ue8b7")
-            ikon.setObjectName("Icon")
-            ikon.setStyleSheet(
-                "font-size: 16pt; background: transparent; color: #8B95A5;"
-            )
+            ikon = QLabel()
+            ikon_name = "mdi6.file-document" if os.path.isfile(p) else "mdi6.folder"
+            ikon.setPixmap(qta.icon(ikon_name, color="#8B95A5").pixmap(24, 24))
 
             v_file = QVBoxLayout()
             v_file.setSpacing(2)
@@ -404,7 +441,11 @@ class TabKunci(QWidget):
                 "font-size: 9pt; color: #8B95A5; background: transparent;"
             )
 
-            btn_rm = QPushButton("\ue8bb")
+            btn_rm = QPushButton()
+            btn_rm.setIcon(
+                qta.icon("mdi6.close", color="#8B95A5", color_active="white")
+            )
+            btn_rm.setIconSize(QSize(20, 20))
             btn_rm.setObjectName("BtnGhost")
             btn_rm.setFixedSize(32, 32)
             btn_rm.clicked.connect(
@@ -433,7 +474,12 @@ class TabKunci(QWidget):
         self.entry_pw2.setEchoMode(mode)
 
         color = "#00D2C8" if mode == QLineEdit.EchoMode.Normal else "#8B95A5"
-        self.btn_toggle_pw.setStyleSheet(f"color: {color};")
+        icon_name = (
+            "mdi6.eye-outline"
+            if mode == QLineEdit.EchoMode.Password
+            else "mdi6.eye-off-outline"
+        )
+        self.btn_toggle_pw.setIcon(qta.icon(icon_name, color=color))
 
     def _on_pw_change(self):
         self.notif.hide_msg()
@@ -460,13 +506,17 @@ class TabKunci(QWidget):
             )
 
         if not pw2:
-            self.lbl_match.setText("")
+            self.lbl_match.setPixmap(
+                qta.icon("mdi6.check-bold", color="transparent").pixmap(20, 20)
+            )
         elif pw1 == pw2:
-            self.lbl_match.setText("\ue73e")
-            self.lbl_match.setStyleSheet("color: #00D2C8; background: transparent;")
+            self.lbl_match.setPixmap(
+                qta.icon("mdi6.check-bold", color="#00D2C8").pixmap(20, 20)
+            )
         else:
-            self.lbl_match.setText("\uea39")
-            self.lbl_match.setStyleSheet("color: #E74C3C; background: transparent;")
+            self.lbl_match.setPixmap(
+                qta.icon("mdi6.close-thick", color="#E74C3C").pixmap(20, 20)
+            )
 
         self._validate_state()
 
@@ -475,24 +525,26 @@ class TabKunci(QWidget):
         self.btn_aksi.setEnabled(len(self._paths) > 0 and bool(pw1) and (pw1 == pw2))
 
     def _proses(self):
-        if not self._paths or (self.worker and self.worker.isRunning()):
+        if self.worker is not None and self.worker.isRunning():
             return
         pw = self.entry_pw1.text()
 
         if self.chk_hapus.isChecked():
-            reply = QMessageBox.warning(
-                self,
-                "Konfirmasi",
-                "File asli akan dihapus. Lanjutkan?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
+            # FIX: Panggil Dialog Kustom, bukan QMessageBox bawaan Windows!
+            dialog = ModernMessageBox(
+                title="Konfirmasi Hapus Asli",
+                message="File/folder asli akan DIHAPUS PERMANEN setelah berhasil dikunci.\n\nApakah Anda yakin ingin melanjutkan?",
+                parent=self,
             )
-            if reply != QMessageBox.StandardButton.Yes:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
 
         default_name = os.path.basename(self._paths[0]) or "Brankas_Rahasia"
         path_simpan, _ = QFileDialog.getSaveFileName(
-            self, "Simpan Brankas", f"{default_name}.locked", "Locked Files (*.locked)"
+            self,
+            "Simpan Brankas Sebagai",
+            f"{default_name}.locked",
+            "Locked Files (*.locked)",
         )
         if not path_simpan:
             return
@@ -505,6 +557,24 @@ class TabKunci(QWidget):
             pw,
             self.chk_hapus.isChecked(),
         )
+
+        self.entry_pw1.blockSignals(True)
+        self.entry_pw2.blockSignals(True)
+        self.entry_pw1.clear()
+        self.entry_pw2.clear()
+        self.entry_pw1.blockSignals(False)
+        self.entry_pw2.blockSignals(False)
+
+        for bar in self.str_bars:
+            bar.setStyleSheet("background-color: #232B3E; border-radius: 3px;")
+        self.lbl_str.setText("Kekuatan: -")
+        self.lbl_str.setStyleSheet("font-size: 9pt; color: #8B95A5; font-weight: bold;")
+        self.lbl_match.setPixmap(
+            qta.icon("mdi6.check-bold", color="transparent").pixmap(20, 20)
+        )
+
+        del pw
+
         self.worker.progress.connect(
             lambda v: self.btn_aksi.setTextLabels(
                 "MENGUNCI...", f"Progress: {int(v*100)}%"
@@ -528,15 +598,39 @@ class TabKunci(QWidget):
             self._validate_state()
 
     def _on_selesai(self, result):
-        self._set_busy(False)
+        self.worker = None
         sukses, pesan = result
+
         if sukses:
-            self.notif.show_msg("ok", f"✔ {pesan}", 6000)
-            self.entry_pw1.clear()
-            self.entry_pw2.clear()
             self._paths.clear()
+            self.chk_hapus.blockSignals(True)
             self.chk_hapus.setChecked(False)
+            self.chk_hapus.blockSignals(False)
             self._render_list()
+
+        self._set_busy(False)
+
+        if sukses:
+            self.notif.show_msg("ok", f" {pesan}", 6000)
+            logger.info(f"Enkripsi sukses: {pesan}")
+            if HAS_PLYER and notification:
+                try:
+                    notification.notify(
+                        title="Digital Locker",
+                        message="Brankas berhasil dikunci dengan aman.",
+                        timeout=5,
+                    )
+                except Exception as e:
+                    logger.warning(f"OS Native Notification gagal: {e}")
         else:
-            log.error("Gagal: %s", pesan)
-            self.notif.show_msg("err", f"✖ {pesan}", 6000)
+            logger.error(f"Gagal mengunci brankas: {pesan}")
+            self.notif.show_msg("err", f" {pesan}", 6000)
+            if HAS_PLYER and notification:
+                try:
+                    notification.notify(
+                        title="Digital Locker - Error",
+                        message=f"Penguncian gagal: {pesan}",
+                        timeout=5,
+                    )
+                except:
+                    pass

@@ -1,8 +1,13 @@
 """
-ui/app.py
-Menerapkan Frameless Window dan penyempurnaan proporsi Tab Pill.
+Modul: app.py
+Deskripsi: Merupakan antarmuka jendela utama (Main Window) dari aplikasi Digital Locker.
+           Menangani tata letak (layout) kerangka aplikasi, instalasi System Tray untuk
+           tugas latar belakang, pengikatan (binding) tab kontrol antara fitur Kunci
+           dan Buka Brankas, serta implementasi kustom Title Bar (Frameless Window).
 """
 
+import sys
+import qtawesome as qta
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -14,8 +19,12 @@ from PySide6.QtWidgets import (
     QFrame,
     QButtonGroup,
     QSizePolicy,
+    QSystemTrayIcon,
+    QMenu,
+    QApplication,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
+from loguru import logger
 
 from .tab_kunci import TabKunci
 from .tab_buka import TabBuka
@@ -24,16 +33,38 @@ from .widgets import CustomTitleBar
 
 
 class AppBrankas(QMainWindow):
+    """
+    Kelas Induk Jendela Aplikasi Digital Locker.
+    """
+
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setFixedSize(1100, 700)
+        self.setMinimumSize(1100, 700)
+
+        # Translucency tetap aktif agar sisi membulat CustomTitleBar
+        # dapat digambar/di-render secara mulus tanpa latar hitam kotak di sudutnya.
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self.setStyleSheet(load_stylesheet())
         self._init_ui()
+        self._init_tray()
+
+        # FIX: Posisikan jendela di tengah layar saat diinisialisasi
+        self._center_window()
+
+    def _center_window(self):
+        """Memposisikan jendela aplikasi tepat di tengah layar secara otomatis."""
+        self.resize(1100, 700)  # Set paksa ke ukuran ideal sebelum menghitung
+        center_point = QApplication.primaryScreen().availableGeometry().center()
+        frame_geo = self.frameGeometry()
+        frame_geo.moveCenter(center_point)
+        self.move(frame_geo.topLeft())
 
     def _init_ui(self):
+        """Membangun arsitektur User Interface utama aplikasi."""
         central_widget = QWidget()
+        central_widget.setObjectName("CentralWidget")
         self.setCentralWidget(central_widget)
 
         main_layout = QVBoxLayout(central_widget)
@@ -60,16 +91,56 @@ class AppBrankas(QMainWindow):
         self._build_footer(content_lay)
         main_layout.addWidget(content_container, 1)
 
+    def _init_tray(self):
+        """Menginisialisasi modul System Tray Icon agar bisa berjalan di background."""
+        self.tray = QSystemTrayIcon(self)
+        self.tray.setIcon(qta.icon("mdi6.shield-lock", color="#00D2C8"))
+
+        tray_menu = QMenu()
+
+        act_show = tray_menu.addAction(" Buka Digital Locker")
+        act_show.setIcon(qta.icon("mdi6.window-maximize", color="white"))
+        act_show.triggered.connect(self.showNormal)
+
+        act_quit = tray_menu.addAction(" Keluar Sepenuhnya")
+        act_quit.setIcon(qta.icon("mdi6.power", color="#E74C3C"))
+        act_quit.triggered.connect(QApplication.instance().quit)
+
+        self.tray.setContextMenu(tray_menu)
+        self.tray.show()
+
+        self.tray.activated.connect(self._on_tray_click)
+
+    def _on_tray_click(self, reason):
+        """Merespon event klik pada ikon System Tray."""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.showNormal()
+
+    def closeEvent(self, event):
+        """
+        Pencegatan event ketika pengguna menekan tombol X (Close).
+        Alih-alih membunuh proses, aplikasi disembunyikan dan dioper ke latar belakang.
+        """
+        event.ignore()
+        self.hide()
+        self.tray.showMessage(
+            "Digital Locker Berjalan",
+            "Aplikasi di-minimize ke System Tray untuk memproses di latar belakang.",
+            QSystemTrayIcon.MessageIcon.Information,
+            3000,
+        )
+        logger.info("Window di-minimize ke System Tray.")
+
     def _build_header(self, parent_layout):
+        """Membangun komponen header atas (Logo, Teks, dan Tombol Navigasi Tab)."""
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
 
-        # --- KIRI: Logo Vektor ---
         lay_kiri = QHBoxLayout()
         lay_kiri.setSpacing(15)
-        lbl_logo = QLabel("\ue72e")
-        lbl_logo.setObjectName("Icon")
-        lbl_logo.setStyleSheet("font-size: 34pt; color: #00D2C8;")
+
+        lbl_logo = QLabel()
+        lbl_logo.setPixmap(qta.icon("mdi6.lock", color="#00D2C8").pixmap(48, 48))
 
         lay_title = QVBoxLayout()
         lay_title.setSpacing(0)
@@ -87,7 +158,6 @@ class AppBrankas(QMainWindow):
 
         header_layout.addStretch()
 
-        # --- TENGAH: Segmented Tab Buttons (Proporsi Diperbaiki) ---
         tab_container = QFrame()
         tab_container.setObjectName("TabContainer")
         tab_container.setFixedSize(320, 48)
@@ -95,16 +165,23 @@ class AppBrankas(QMainWindow):
         lay_tabs.setContentsMargins(4, 4, 4, 4)
         lay_tabs.setSpacing(4)
 
-        self.btn_nav_kunci = QPushButton("\ue72e  Kunci Folder")
+        self.btn_nav_kunci = QPushButton(" Kunci Folder")
+        self.btn_nav_kunci.setIcon(
+            qta.icon("mdi6.lock", color="#8B95A5", color_on="white")
+        )
+        self.btn_nav_kunci.setIconSize(QSize(20, 20))
         self.btn_nav_kunci.setObjectName("TabBtn")
         self.btn_nav_kunci.setCheckable(True)
         self.btn_nav_kunci.setChecked(True)
-        # Force tombol memenuhi tinggi container
         self.btn_nav_kunci.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
-        self.btn_nav_buka = QPushButton("\ue785  Buka Brankas")
+        self.btn_nav_buka = QPushButton(" Buka Brankas")
+        self.btn_nav_buka.setIcon(
+            qta.icon("mdi6.lock-open-variant", color="#8B95A5", color_on="white")
+        )
+        self.btn_nav_buka.setIconSize(QSize(20, 20))
         self.btn_nav_buka.setObjectName("TabBtn")
         self.btn_nav_buka.setCheckable(True)
         self.btn_nav_buka.setSizePolicy(
@@ -122,12 +199,13 @@ class AppBrankas(QMainWindow):
 
         header_layout.addStretch()
 
-        # --- KANAN: Status Vektor (Tombol Setting Dihapus) ---
         lay_kanan = QHBoxLayout()
         lay_kanan.setSpacing(15)
-        lbl_shield = QLabel("\uea18")
-        lbl_shield.setObjectName("Icon")
-        lbl_shield.setStyleSheet("font-size: 24pt; color: #00D2C8;")
+
+        lbl_shield = QLabel()
+        lbl_shield.setPixmap(
+            qta.icon("mdi6.shield-check", color="#00D2C8").pixmap(32, 32)
+        )
 
         lay_status = QVBoxLayout()
         lay_status.setSpacing(0)
@@ -143,27 +221,42 @@ class AppBrankas(QMainWindow):
 
         lay_kanan.addWidget(lbl_shield)
         lay_kanan.addLayout(lay_status)
-        # (btn_settings sudah dihapus dari sini)
 
         header_layout.addLayout(lay_kanan)
         parent_layout.addLayout(header_layout)
 
     def _build_footer(self, parent_layout):
+        """Membangun komponen footer penutup di dasar aplikasi."""
         lay_footer = QHBoxLayout()
-        lbl_safe = QLabel("\uea18  Semua operasi aman dan terenkripsi")
-        lbl_safe.setObjectName("Icon")
-        lbl_safe.setStyleSheet("color: #8B95A5; font-size: 9pt;")
 
-        # Versi diubah menjadi 1.0.0
-        lbl_ver = QLabel("Version 1.0.0 \ue73e")
-        lbl_ver.setObjectName("Icon")
-        lbl_ver.setStyleSheet("color: #8B95A5; font-size: 9pt;")
+        lay_safe = QHBoxLayout()
+        lay_safe.setSpacing(8)
+        lbl_safe_icon = QLabel()
+        lbl_safe_icon.setPixmap(
+            qta.icon("mdi6.shield-check", color="#8B95A5").pixmap(16, 16)
+        )
+        lbl_safe_text = QLabel("Semua operasi aman dan terenkripsi")
+        lbl_safe_text.setStyleSheet("color: #8B95A5; font-size: 9pt;")
+        lay_safe.addWidget(lbl_safe_icon)
+        lay_safe.addWidget(lbl_safe_text)
 
-        lay_footer.addWidget(lbl_safe)
+        lay_ver = QHBoxLayout()
+        lay_ver.setSpacing(8)
+        lbl_ver_text = QLabel("Version 1.0.0")
+        lbl_ver_text.setStyleSheet("color: #8B95A5; font-size: 9pt;")
+        lbl_ver_icon = QLabel()
+        lbl_ver_icon.setPixmap(
+            qta.icon("mdi6.check-circle", color="#8B95A5").pixmap(16, 16)
+        )
+        lay_ver.addWidget(lbl_ver_text)
+        lay_ver.addWidget(lbl_ver_icon)
+
+        lay_footer.addLayout(lay_safe)
         lay_footer.addStretch()
-        lay_footer.addWidget(lbl_ver)
+        lay_footer.addLayout(lay_ver)
         parent_layout.addLayout(lay_footer)
 
     def _on_tab_changed(self, button):
+        """Slot untuk berpindah indeks halaman QStackedWidget sesuai tombol yang ditekan."""
         idx = self.tab_group.id(button)
         self.stacked_tabs.setCurrentIndex(idx)
