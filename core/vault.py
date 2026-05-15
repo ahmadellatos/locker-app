@@ -10,7 +10,7 @@ import shutil
 import uuid
 import tarfile
 import stat
-import time  # FIX: Import time untuk perhitungan umur folder temp
+import time
 from pathlib import Path
 from enum import Enum
 from typing import Callable, Optional
@@ -250,7 +250,6 @@ def kunci_brankas(
     is_cancelled: Callable[[], bool] = None,
 ) -> tuple[VaultStatus, str]:
 
-    # FIX: Validasi path kosong/tidak ada dari review test_folder_path_tidak_ada
     valid_paths = [p for p in paths if Path(p).exists()]
     if not valid_paths:
         return VaultStatus.ERROR, "Tidak ada file/folder valid untuk dikunci."
@@ -260,6 +259,19 @@ def kunci_brankas(
     backup_dibuat = False
 
     try:
+        # FIX: Cek free space saat mengunci (Safety buffer 50MB)
+        free_space = shutil.disk_usage(target_path.parent).free
+        total_size = _hitung_total_size(valid_paths)
+        required_space = total_size + (50 * 1024 * 1024)
+
+        if free_space < required_space:
+            req_mb = required_space / (1024 * 1024)
+            free_mb = free_space / (1024 * 1024)
+            return (
+                VaultStatus.ERROR,
+                f"Ruang penyimpanan tidak cukup!\nSisa disk: {free_mb:.1f} MB. Butuh minimal {req_mb:.1f} MB.",
+            )
+
         if target_path.exists():
             target_path.replace(backup_path)
             backup_dibuat = True
@@ -269,7 +281,6 @@ def kunci_brankas(
         key = derive_key(password, salt)
         safe_cb(progress_cb, 0.05)
 
-        total_size = _hitung_total_size(valid_paths)
         encryptor = make_encryptor(key, nonce)
 
         is_single_file = len(valid_paths) == 1 and Path(valid_paths[0]).is_file()
@@ -302,7 +313,9 @@ def kunci_brankas(
                         if target_dir
                         else path_item.name
                     )
-                    tar.add(str(path_item), arcname=arcname)
+                    tar.add(
+                        path_item, arcname=arcname
+                    )  # Menggunakan path_item secara native
 
             out_stream.flush()
             fk.write(encryptor.finalize())
@@ -357,7 +370,19 @@ def buka_brankas(
         cipher_len = total_size - 44
         base_dir = target_path.parent
 
-        # FIX: Race condition cleanup — hanya hapus temp folder yang umurnya > 5 menit (stale)
+        # FIX: Cek free space saat mengekstrak (Safety buffer 50MB)
+        free_space = shutil.disk_usage(base_dir).free
+        required_space = cipher_len + (50 * 1024 * 1024)
+
+        if free_space < required_space:
+            req_mb = required_space / (1024 * 1024)
+            free_mb = free_space / (1024 * 1024)
+            return (
+                VaultStatus.ERROR,
+                f"Ruang penyimpanan tidak cukup!\nSisa disk: {free_mb:.1f} MB. Butuh minimal {req_mb:.1f} MB.",
+            )
+
+        # Race condition cleanup — hapus temp folder yang umurnya > 5 menit (stale)
         for old_temp in base_dir.glob("._dec_*"):
             if old_temp.is_dir():
                 try:
@@ -415,8 +440,9 @@ def buka_brankas(
             temp_ext_dir.mkdir(parents=True, exist_ok=True)
 
             try:
+                # Menggunakan temp_ext_dir (Path object) secara native
                 with tarfile.open(fileobj=in_stream, mode="r|") as tar:
-                    tar.extractall(path=str(temp_ext_dir), filter="data")
+                    tar.extractall(path=temp_ext_dir, filter="data")
 
                 in_stream.read()
 
@@ -427,7 +453,8 @@ def buka_brankas(
                 if path_tujuan.exists():
                     hapus_permanen(path_tujuan)
 
-                shutil.move(str(src), str(path_tujuan))
+                # FIX: Menghilangkan str() casting yang redundan pada shutil
+                shutil.move(src, path_tujuan)
 
             except InvalidTag:
                 return VaultStatus.WRONG_PASSWORD, None

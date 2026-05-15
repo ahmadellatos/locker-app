@@ -9,7 +9,6 @@ Deskripsi: Merupakan antarmuka jendela utama (Main Window) dari aplikasi Digital
 import sys
 import qtawesome as qta
 from PySide6.QtWidgets import (
-    QMainWindow,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -27,34 +26,35 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, QPropertyAnimation
 from loguru import logger
 
+# Import FramelessMainWindow untuk dukungan Native Resize & Aero Snap
+from qframelesswindow import FramelessMainWindow
+
 from .tab_kunci import TabKunci
 from .tab_buka import TabBuka
 from .widgets import CustomTitleBar
 
 
-class AppBrankas(QMainWindow):
+class AppBrankas(FramelessMainWindow):
     """
     Kelas Induk Jendela Aplikasi Digital Locker.
     """
 
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setMinimumSize(1100, 700)
 
-        # Translucency tetap aktif agar sisi membulat CustomTitleBar
-        # dapat digambar/di-render secara mulus tanpa latar hitam kotak di sudutnya.
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # FIX: Turunin minimum size biar Aero Snap di setengah layar 1080p (960px)
+        # nggak bikin UI kepotong.
+        self.setMinimumSize(900, 600)
+        self.setObjectName("MainWindow")
 
         self._init_ui()
         self._init_tray()
-
-        # FIX: Posisikan jendela di tengah layar saat diinisialisasi
         self._center_window()
 
     def _center_window(self):
         """Memposisikan jendela aplikasi tepat di tengah layar secara otomatis."""
-        self.resize(1100, 700)  # Set paksa ke ukuran ideal sebelum menghitung
+        # Biar pas pertama buka tetap berukuran ideal (lega)
+        self.resize(1100, 700)
         center_point = QApplication.primaryScreen().availableGeometry().center()
         frame_geo = self.frameGeometry()
         frame_geo.moveCenter(center_point)
@@ -67,11 +67,13 @@ class AppBrankas(QMainWindow):
         self.setCentralWidget(central_widget)
 
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        # Berikan margin atas 32px (sebesar tinggi title bar).
+        main_layout.setContentsMargins(0, 32, 0, 0)
         main_layout.setSpacing(0)
 
+        # Pasang Custom Title Bar via mekanisme bawaan library
         self.title_bar = CustomTitleBar(self)
-        main_layout.addWidget(self.title_bar)
+        self.setTitleBar(self.title_bar)
 
         content_container = QWidget()
         content_lay = QVBoxLayout(content_container)
@@ -260,33 +262,9 @@ class AppBrankas(QMainWindow):
         if new_idx == self.stacked_tabs.currentIndex():
             return
 
-        old_widget = self.stacked_tabs.currentWidget()
-        effect = QGraphicsOpacityEffect(old_widget)
-        old_widget.setGraphicsEffect(effect)
-
-        self._anim_out = QPropertyAnimation(effect, b"opacity")
-        self._anim_out.setDuration(60)
-        self._anim_out.setStartValue(1.0)
-        self._anim_out.setEndValue(0.0)
-        self._anim_out.finished.connect(
-            lambda: self._finish_tab_switch(new_idx, old_widget)
-        )
-        self._anim_out.start()
-
-    def _finish_tab_switch(self, new_idx, old_widget):
-        old_widget.setGraphicsEffect(None)
+        # FIX: Hapus animasi OpacityEffect yang menyebabkan QPainter collision.
+        # Transisi langsung pindah tab agar terhindar dari bentrok dengan DropShadowEffect.
         self.stacked_tabs.setCurrentIndex(new_idx)
-
-        new_widget = self.stacked_tabs.currentWidget()
-        effect = QGraphicsOpacityEffect(new_widget)
-        new_widget.setGraphicsEffect(effect)
-
-        self._anim_in = QPropertyAnimation(effect, b"opacity")
-        self._anim_in.setDuration(75)
-        self._anim_in.setStartValue(0.0)
-        self._anim_in.setEndValue(1.0)
-        self._anim_in.finished.connect(lambda: new_widget.setGraphicsEffect(None))
-        self._anim_in.start()
 
     def showEvent(self, event):
         super().showEvent(event)

@@ -1,8 +1,8 @@
 """
 Modul: tab_kunci.py
 Deskripsi: Antarmuka untuk Tab "Kunci Folder"
-           Ditambahkan fitur Advanced: Secure Wipe dengan peringatan UI.
-           Ditambahkan ElidedLabel agar path panjang dipotong otomatis dengan ellipsis (...).
+           Diperbarui: Mengganti icon_empty standar dengan HeroIconWidget glowing,
+           dan FIX missing import QStackedWidget.
 """
 
 import os
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QDialog,
     QSizePolicy,
+    QStackedWidget,  # FIX: Modul ini yang tadi ketinggalan di-import!
 )
 from PySide6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QCursor
@@ -35,6 +36,8 @@ from .widgets import (
     BigActionBtn,
     ModernMessageBox,
     CustomToolTip,
+    ElidedLabel,
+    HeroIconWidget,
 )
 
 notification = None
@@ -56,41 +59,6 @@ def pw_strength(pw: str) -> int:
 
 STRENGTH_COLORS = ["#E74C3C", "#E67E22", "#00D2C8", "#00D2C8"]
 STRENGTH_LABELS = ["Lemah", "Cukup", "Kuat", "Sangat Kuat"]
-
-
-# ── LABEL KUSTOM UNTUK MEMOTONG TEKS PANJANG (ELLIPSIS) ───────────────
-class ElidedLabel(QLabel):
-    def __init__(self, text="", mode=Qt.TextElideMode.ElideMiddle, parent=None):
-        super().__init__(text, parent)
-        self._full_text = text
-        self._mode = mode
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.setMinimumWidth(10)
-
-    def setText(self, text):
-        self._full_text = text
-        self._update_elided_text()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._update_elided_text()
-
-    def _update_elided_text(self):
-        metrics = self.fontMetrics()
-        elided = metrics.elidedText(
-            self._full_text, self._mode, max(10, self.width() - 5)
-        )
-        if self.text() != elided:
-            super().setText(elided)
-
-    def minimumSizeHint(self):
-        return QSize(10, super().minimumSizeHint().height())
-
-    def sizeHint(self):
-        return QSize(50, super().sizeHint().height())
-
-
-# ────────────────────────────────────────────────────────────────────
 
 
 class MultiDropFrame(QFrame):
@@ -130,10 +98,34 @@ class TabKunci(QWidget):
         super().__init__()
         self._paths = []
         self.worker: CryptoWorker | None = None
-
         self._custom_tooltip = CustomToolTip(self)
-
         self._build_ui()
+
+    def _update_card_style(self, is_empty: bool):
+        if is_empty:
+            self.card_target.setStyleSheet("""
+                QFrame#DropArea {
+                    border: 2px dashed #232B3E;
+                    background-color: #0B101E;
+                    border-radius: 12px;
+                }
+                QFrame#DropArea[dragActive="true"] {
+                    border: 2px dashed #00D2C8;
+                    background-color: #181F32;
+                }
+            """)
+        else:
+            self.card_target.setStyleSheet("""
+                QFrame#DropArea {
+                    border: 1px solid #232B3E;
+                    background-color: #111625;
+                    border-radius: 12px;
+                }
+                QFrame#DropArea[dragActive="true"] {
+                    border: 2px dashed #00D2C8;
+                    background-color: #181F32;
+                }
+            """)
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -143,17 +135,88 @@ class TabKunci(QWidget):
         h_cols = QHBoxLayout()
         h_cols.setSpacing(20)
 
-        # ---------------------------------------------
         # KIRI (Daftar Target)
-        # ---------------------------------------------
         v_left = QVBoxLayout()
         self.card_target = MultiDropFrame()
         self.card_target.on_paths_dropped = self._add_paths
         apply_shadow(self.card_target, blur_radius=30, opacity=40)
 
         lay_target = QVBoxLayout(self.card_target)
-        lay_target.setContentsMargins(25, 25, 25, 25)
-        lay_target.setSpacing(15)
+        lay_target.setContentsMargins(2, 2, 2, 2)
+
+        self.stack_target = QStackedWidget()
+        lay_target.addWidget(self.stack_target)
+
+        menu = QMenu(self)
+        action_file = menu.addAction(" File")
+        action_file.setIcon(qta.icon("mdi6.file-document", color="white"))
+        action_file.triggered.connect(self._pilih_file)
+
+        action_folder = menu.addAction(" Folder")
+        action_folder.setIcon(qta.icon("mdi6.folder", color="white"))
+        action_folder.triggered.connect(self._pilih_folder)
+
+        # --- PAGE 0: DASHED EMPTY STATE DENGAN HERO ICON ---
+        page_empty = QWidget()
+        lay_empty = QVBoxLayout(page_empty)
+        lay_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay_empty.setSpacing(10)
+
+        icon_empty = HeroIconWidget(mode="kunci")
+
+        lbl_main_empty = QLabel("Drag & drop file atau folder ke sini")
+        lbl_main_empty.setStyleSheet(
+            "font-size: 13pt; font-weight: bold; color: white;"
+        )
+        lbl_main_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        lbl_sub_empty = QLabel("atau klik tombol di bawah untuk memilih secara manual")
+        lbl_sub_empty.setStyleSheet("font-size: 10pt; color: #8B95A5;")
+        lbl_sub_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.btn_empty_browse = QPushButton(" Pilih Target")
+        self.btn_empty_browse.setIcon(qta.icon("mdi6.folder-plus", color="white"))
+        self.btn_empty_browse.setFixedSize(220, 42)
+        self.btn_empty_browse.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(24, 31, 50, 0.5);
+                border: 1px solid #232B3E;
+                border-radius: 8px;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #181F32;
+                border: 1px solid #00D2C8;
+            }
+            QPushButton::menu-indicator { image: none; width: 0px; }
+        """)
+        self.btn_empty_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_empty_browse.setMenu(menu)
+
+        lbl_footer_empty = QLabel("Mendukung semua format file dan folder tak terbatas")
+        lbl_footer_empty.setStyleSheet("font-size: 9pt; color: #5B6575;")
+        lbl_footer_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        lay_empty.addStretch()
+        lay_empty.addWidget(icon_empty, alignment=Qt.AlignmentFlag.AlignHCenter)
+        lay_empty.addSpacing(10)
+        lay_empty.addWidget(lbl_main_empty)
+        lay_empty.addWidget(lbl_sub_empty)
+        lay_empty.addSpacing(15)
+        lay_empty.addWidget(
+            self.btn_empty_browse, alignment=Qt.AlignmentFlag.AlignHCenter
+        )
+        lay_empty.addSpacing(25)
+        lay_empty.addWidget(lbl_footer_empty)
+        lay_empty.addStretch()
+        self.stack_target.addWidget(page_empty)
+
+        # --- PAGE 1: FILLED LIST STATE ---
+        page_list = QWidget()
+        lay_list = QVBoxLayout(page_list)
+        lay_list.setContentsMargins(23, 23, 23, 23)
+        lay_list.setSpacing(15)
 
         row_hdr = QHBoxLayout()
         icon_folder = QLabel()
@@ -181,19 +244,9 @@ class TabKunci(QWidget):
         self.btn_add.setStyleSheet(
             "QPushButton#BtnGhost { font-size: 10pt; border: 1px solid #232B3E; } QPushButton::menu-indicator { image: none; width: 0px; }"
         )
-
-        menu = QMenu(self)
-        action_file = menu.addAction(" File")
-        action_file.setIcon(qta.icon("mdi6.file-document", color="white"))
-        action_file.triggered.connect(self._pilih_file)
-
-        action_folder = menu.addAction(" Folder")
-        action_folder.setIcon(qta.icon("mdi6.folder", color="white"))
-        action_folder.triggered.connect(self._pilih_folder)
-
         self.btn_add.setMenu(menu)
         row_hdr.addWidget(self.btn_add, alignment=Qt.AlignmentFlag.AlignTop)
-        lay_target.addLayout(row_hdr)
+        lay_list.addLayout(row_hdr)
 
         self.inner_frame = QFrame()
         self.inner_frame.setObjectName("Inner")
@@ -213,22 +266,22 @@ class TabKunci(QWidget):
         self.list_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_area.setWidget(self.list_container)
 
-        # FIX BUG: Sembunyikan tooltip seketika saat user ngescroll!
         self.scroll_area.verticalScrollBar().valueChanged.connect(
             lambda _: self._custom_tooltip.hide_tooltip()
         )
 
         inner_lay.addWidget(self.scroll_area)
-        lay_target.addWidget(self.inner_frame, 1)
+        lay_list.addWidget(self.inner_frame, 1)
+
+        self.stack_target.addWidget(page_list)
+
+        self._update_card_style(True)
         v_left.addWidget(self.card_target, 1)
 
-        # ---------------------------------------------
-        # CONTAINER OPSI HAPUS (Hapus Asli & Secure Wipe)
-        # ---------------------------------------------
+        # OPSI HAPUS
         lay_opsi_hapus = QVBoxLayout()
         lay_opsi_hapus.setSpacing(0)
 
-        # 1. Checkbox Hapus File Asli
         lay_chk1 = QHBoxLayout()
         lay_chk1.setContentsMargins(5, 5, 5, 0)
         lay_chk1.setSpacing(0)
@@ -258,7 +311,6 @@ class TabKunci(QWidget):
         lay_chk1.addLayout(v_chk_txt1)
         lay_opsi_hapus.addLayout(lay_chk1)
 
-        # 2. Secure Wipe — Collapsible Container
         self.widget_secure_wipe = QWidget()
         self.widget_secure_wipe.setMaximumHeight(0)
         self.widget_secure_wipe.setMinimumHeight(0)
@@ -293,12 +345,10 @@ class TabKunci(QWidget):
         v_left.addLayout(lay_opsi_hapus)
         h_cols.addLayout(v_left, 1)
 
-        # Animasi expand/collapse Secure Wipe
         self.anim_secure = QPropertyAnimation(self.widget_secure_wipe, b"maximumHeight")
         self.anim_secure.setDuration(250)
         self.anim_secure.setEasingCurve(QEasingCurve.Type.InOutCubic)
 
-        # Logic Event Checkbox
         def _toggle_hapus_asli():
             self.chk_hapus._checked = not self.chk_hapus._checked
             self.chk_hapus.setProperty("checked", self.chk_hapus._checked)
@@ -347,9 +397,7 @@ class TabKunci(QWidget):
         self.chk_hapus.mousePressEvent = lambda e: _toggle_hapus_asli()
         self.chk_secure.mousePressEvent = lambda e: _toggle_secure_wipe()
 
-        # ---------------------------------------------
         # KANAN (Password Form)
-        # ---------------------------------------------
         v_right = QVBoxLayout()
         card_pw = QFrame()
         card_pw.setObjectName("Card")
@@ -532,14 +580,13 @@ class TabKunci(QWidget):
                 item.widget().deleteLater()
 
         if not self._paths:
-            lbl = QLabel("Belum ada target\n\nSeret file ke area ini")
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(
-                "color: #8B95A5; margin-top: 60px; font-weight: bold; font-size: 11pt;"
-            )
-            self.list_layout.addWidget(lbl)
+            self.stack_target.setCurrentIndex(0)
+            self._update_card_style(True)
             self._validate_state()
             return
+
+        self.stack_target.setCurrentIndex(1)
+        self._update_card_style(False)
 
         for p in self._paths:
             row = QFrame()
@@ -732,6 +779,7 @@ class TabKunci(QWidget):
 
     def _set_busy(self, busy: bool):
         self.btn_add.setEnabled(not busy)
+        self.btn_empty_browse.setEnabled(not busy)
         if busy:
             self.btn_aksi.setTextLabels(
                 "MENGUNCI BRANKAS...", "Harap tunggu, proses sedang berjalan"

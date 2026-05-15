@@ -1,12 +1,13 @@
 """
 Modul: widgets.py
 Deskripsi: Kumpulan komponen UI (Widget) kustom.
-           Diperbarui dengan penambahan CustomToolTip dengan Timer Delay ala Native.
+           Diperbarui: Penambahan HeroIconWidget untuk desain Dropzone bercahaya.
 """
 
 import inspect
 import qtawesome as qta
 from PySide6.QtWidgets import (
+    QWidget,
     QFrame,
     QLabel,
     QVBoxLayout,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QPushButton,
     QDialog,
+    QSizePolicy,
 )
 from PySide6.QtCore import (
     Qt,
@@ -40,13 +42,66 @@ def apply_shadow(widget, blur_radius=20, y_offset=6, opacity=60):
     widget.setGraphicsEffect(shadow)
 
 
-# ── CUSTOM TOOLTIP WIDGET DENGAN DELAY ──────────────────────────────
-class CustomToolTip(QLabel):
+# ── HERO ICON WIDGET (FOLDER GLOWING) ───────────────────────────────
+class HeroIconWidget(QWidget):
     """
-    Label melayang khusus untuk merender tooltip yang cantik.
-    Dilengkapi dengan QTimer agar ada jeda waktu (delay) sebelum muncul.
+    Ikon kustom komposit yang menumpuk beberapa ikon QTAwesome
+    untuk menciptakan efek 3D dan Glowing persis seperti mock-up desain.
     """
 
+    def __init__(self, mode="kunci", parent=None):
+        super().__init__(parent)
+        self.setFixedSize(160, 110)
+
+        # 1. Bintang-bintang / Sparkles (x, y, size, color)
+        sparkles = [
+            (30, 15, 14, "#4A90E2"),  # Kiri atas besar
+            (10, 40, 10, "#4A90E2"),  # Kiri tengah kecil
+            (125, 35, 14, "#4A90E2"),  # Kanan atas
+            (140, 65, 10, "#4A90E2"),  # Kanan bawah
+        ]
+
+        for x, y, sz, col in sparkles:
+            lbl = QLabel(self)
+            lbl.setPixmap(qta.icon("mdi6.star-four-points", color=col).pixmap(sz, sz))
+            lbl.setGeometry(x, y, sz, sz)
+            glow = QGraphicsDropShadowEffect(self)
+            glow.setBlurRadius(15)
+            glow.setColor(QColor(col))
+            glow.setXOffset(0)
+            glow.setYOffset(0)
+            lbl.setGraphicsEffect(glow)
+
+        # 2. Folder Base (Warna Navy Gelap)
+        lbl_folder = QLabel(self)
+        lbl_folder.setPixmap(qta.icon("mdi6.folder", color="#2A344A").pixmap(90, 90))
+        lbl_folder.setGeometry(35, 10, 90, 90)
+        lbl_folder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # 3. Overlay Icon (Tameng Glowing)
+        lbl_overlay = QLabel(self)
+        if mode == "kunci":
+            icon_name = "mdi6.shield-lock"  # Tameng + Gembok
+        else:
+            icon_name = "mdi6.shield-key"  # Tameng + Kunci
+
+        lbl_overlay.setPixmap(qta.icon(icon_name, color="#00D2C8").pixmap(36, 36))
+        lbl_overlay.setGeometry(62, 42, 36, 36)
+        lbl_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Efek Cahaya / Glow pada Tameng
+        glow_overlay = QGraphicsDropShadowEffect(self)
+        glow_overlay.setBlurRadius(25)
+        glow_overlay.setColor(QColor("#00D2C8"))
+        glow_overlay.setXOffset(0)
+        glow_overlay.setYOffset(0)
+        lbl_overlay.setGraphicsEffect(glow_overlay)
+
+
+# ────────────────────────────────────────────────────────────────────
+
+
+class CustomToolTip(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
@@ -63,12 +118,10 @@ class CustomToolTip(QLabel):
         """)
         self.hide()
 
-        # Siapkan Timer untuk efek delay
         self._delay_timer = QTimer(self)
         self._delay_timer.setSingleShot(True)
         self._delay_timer.timeout.connect(self._do_show)
 
-        # Timer untuk Auto-Hide (hilang otomatis setelah 5 detik)
         self._autohide_timer = QTimer(self)
         self._autohide_timer.setSingleShot(True)
         self._autohide_timer.timeout.connect(self.hide_tooltip)
@@ -76,29 +129,52 @@ class CustomToolTip(QLabel):
         self._pending_text = ""
 
     def request_show(self, text):
-        """Meminta tooltip untuk tampil, tapi tunggu 1500ms dulu."""
         self._pending_text = text
-        self._delay_timer.start(1500)  # Sesuai request, delay 1500 milidetik
+        self._delay_timer.start(1500)
 
     def _do_show(self):
-        """Fungsi ini dieksekusi oleh timer kalau mouse betah diam > 1500ms."""
         self.setText(self._pending_text)
         self.adjustSize()
-        pos = QCursor.pos()  # Ambil posisi mouse saat ini
+        pos = QCursor.pos()
         self.move(pos.x() + 15, pos.y() + 15)
         self.show()
-
-        # Mulai timer auto-hide 5 detik setelah tooltip berhasil muncul
         self._autohide_timer.start(5000)
 
     def hide_tooltip(self):
-        """Sembunyikan tooltip dan batalkan timer jika sedang jalan."""
         self._delay_timer.stop()
         self._autohide_timer.stop()
         self.hide()
 
 
-# ────────────────────────────────────────────────────────────────────
+class ElidedLabel(QLabel):
+    def __init__(self, text="", mode=Qt.TextElideMode.ElideMiddle, parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self._mode = mode
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(10)
+
+    def setText(self, text):
+        self._full_text = text
+        self._update_elided_text()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self):
+        metrics = self.fontMetrics()
+        elided = metrics.elidedText(
+            self._full_text, self._mode, max(10, self.width() - 5)
+        )
+        if self.text() != elided:
+            super().setText(elided)
+
+    def minimumSizeHint(self):
+        return QSize(10, super().minimumSizeHint().height())
+
+    def sizeHint(self):
+        return QSize(50, super().sizeHint().height())
 
 
 class ModernMessageBox(QDialog):
@@ -381,8 +457,10 @@ class AnimatedNotifBar(QFrame):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self.parentWidget():
-            self.parentWidget().installEventFilter(self)
+        parent = self.parentWidget()
+        if parent:
+            parent.removeEventFilter(self)
+            parent.installEventFilter(self)
 
     def eventFilter(self, obj, event):
         if obj == self.parentWidget() and event.type() == event.Type.Resize:

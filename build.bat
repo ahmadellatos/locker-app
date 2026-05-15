@@ -14,12 +14,15 @@ echo Silakan tinggal ngopi dulu...
 echo.
 
 python -m nuitka ^
+    --standalone ^
     --onefile ^
-    --windows-disable-console ^
+    --windows-console-mode=disable ^
     --enable-plugin=pyside6 ^
     --include-package=core ^
     --include-package=ui ^
     --include-package=cryptography ^
+    --noinclude-pytest-mode=nofollow ^
+    --nofollow-import-to=tests ^
     --assume-yes-for-downloads ^
     --output-filename="Digital Locker.exe" ^
     --output-dir=release_build ^
