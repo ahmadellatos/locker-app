@@ -61,6 +61,29 @@ STRENGTH_COLORS = ["#E74C3C", "#E67E22", "#00D2C8", "#00D2C8"]
 STRENGTH_LABELS = ["Lemah", "Cukup", "Kuat", "Sangat Kuat"]
 
 
+class FileListRow(QFrame):
+    """
+    Row item pada daftar file target.
+    Subclass QFrame dengan proper override enterEvent/leaveEvent
+    untuk tooltip — menggantikan monkey-patch yang fragile.
+    """
+
+    def __init__(self, path: str, tooltip_widget, parent=None):
+        super().__init__(parent)
+        self._path = path
+        self._tooltip_widget = tooltip_widget
+        self.setObjectName("ListItem")
+        self.setFixedHeight(56)
+
+    def enterEvent(self, event):
+        self._tooltip_widget.request_show(self._path)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._tooltip_widget.hide_tooltip()
+        super().leaveEvent(event)
+
+
 class MultiDropFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -589,12 +612,7 @@ class TabKunci(QWidget):
         self._update_card_style(False)
 
         for p in self._paths:
-            row = QFrame()
-            row.setObjectName("ListItem")
-            row.setFixedHeight(56)
-
-            row.enterEvent = lambda e, text=p: self._custom_tooltip.request_show(text)
-            row.leaveEvent = lambda e: self._custom_tooltip.hide_tooltip()
+            row = FileListRow(p, self._custom_tooltip)
 
             r_lay = QHBoxLayout(row)
             r_lay.setContentsMargins(15, 0, 15, 0)
@@ -716,7 +734,11 @@ class TabKunci(QWidget):
 
     def _validate_state(self):
         pw1, pw2 = self.entry_pw1.text(), self.entry_pw2.text()
-        self.btn_aksi.setEnabled(len(self._paths) > 0 and bool(pw1) and (pw1 == pw2))
+        score = pw_strength(pw1)
+        is_strong_enough = score >= 1
+        self.btn_aksi.setEnabled(
+            len(self._paths) > 0 and bool(pw1) and (pw1 == pw2) and is_strong_enough
+        )
 
     def _proses(self):
         if self.worker is not None and self.worker.isRunning():
@@ -826,10 +848,8 @@ class TabKunci(QWidget):
                         message="Brankas dikunci dengan aman.",
                         timeout=5,
                     )
-                except:
-                    pass
-        elif status == VaultStatus.CANCELLED:
-            self.notif.show_msg("warn", "Operasi penguncian dibatalkan pengguna.", 4000)
+                except Exception as e:
+                    logger.warning(f"Notifikasi sistem gagal: {e}")
             logger.info("Enkripsi dibatalkan.")
         else:
             logger.error(f"Gagal mengunci: {pesan}")

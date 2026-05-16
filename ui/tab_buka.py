@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QStackedWidget,
+    QDialog,
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFontMetrics
@@ -29,6 +30,7 @@ from .widgets import (
     BigActionBtn,
     ElidedLabel,
     HeroIconWidget,
+    ModernMessageBox,
 )
 
 notification = None
@@ -407,41 +409,58 @@ class TabBuka(QWidget):
             )
             self._validate_state()
 
-    def _on_selesai(self, result):
-        self.worker = None
-        status, msg = result
 
-        if status == VaultStatus.SUCCESS:
-            self.entry_pw.blockSignals(True)
-            self.entry_pw.clear()
-            self.entry_pw.blockSignals(False)
-            self._clear_file()
+def _on_selesai(self, result):
+    self.worker = None
+    status, msg = result
 
-        self._set_busy(False)
+    if status == VaultStatus.SUCCESS:
+        self.entry_pw.blockSignals(True)
+        self.entry_pw.clear()
+        self.entry_pw.blockSignals(False)
+        self._clear_file()
 
-        if status == VaultStatus.SUCCESS:
-            self.notif.show_msg(
-                "ok", f"Folder/File '{msg}' berhasil dikembalikan!", 6000
-            )
-            if HAS_PLYER and notification:
-                try:
-                    notification.notify(
-                        title="Digital Locker",
-                        message=f"Brankas '{msg}' berhasil dibuka.",
-                        timeout=5,
-                    )
-                except:
-                    pass
-        elif status == VaultStatus.CANCELLED:
-            self.notif.show_msg("warn", "Dekripsi dibatalkan pengguna.", 4000)
-        elif status == VaultStatus.WRONG_PASSWORD:
-            self.notif.show_msg("err", "Password salah atau file corrupted! Coba lagi.")
-        elif status == VaultStatus.OVERWRITE_NEEDED:
+    self._set_busy(False)
+
+    if status == VaultStatus.SUCCESS:
+        self.notif.show_msg("ok", f"Folder/File '{msg}' berhasil dikembalikan!", 6000)
+        if HAS_PLYER and notification:
+            try:
+                notification.notify(
+                    title="Digital Locker",
+                    message=f"Brankas '{msg}' berhasil dibuka.",
+                    timeout=5,
+                )
+            except Exception as e:
+                logger.warning(f"Notifikasi sistem gagal: {e}")
+
+    elif status == VaultStatus.CANCELLED:
+        self.notif.show_msg("warn", "Dekripsi dibatalkan pengguna.", 4000)
+
+    elif status == VaultStatus.WRONG_PASSWORD:
+        self.notif.show_msg("err", "Password salah atau file corrupted! Coba lagi.")
+
+    # 🔥 FIX: Diubah jadi Pop Up Confirmation yang jauh lebih elegan! 🔥
+    elif status == VaultStatus.OVERWRITE_NEEDED:
+        dialog = ModernMessageBox(
+            title="Konfirmasi Timpa File",
+            message=f"Folder/File bernama '{msg}' sudah ada di lokasi tujuan.\n\nApakah Anda yakin ingin menimpanya? Data lama akan hilang secara permanen.",
+            icon_name="mdi6.alert-decagram",
+            icon_color="#E67E22",
+            parent=self,
+        )
+        dialog.btn_yes.setText("Timpa Data")
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Kalo setuju, langsung gas jalanin _proses ulang secara paksa!
             self._konfirmasi_timpa = True
-            self.btn_aksi.setTextLabels(
-                "TIMPA FILE YANG ADA", "Klik lagi untuk memaksa ekstrak"
-            )
-            self.btn_aksi.setEnabled(True)
-            self.notif.show_msg("warn", f"'{msg}' sudah ada! Klik lagi untuk menimpa.")
+            self._proses()
         else:
-            self.notif.show_msg("err", f"Error: {msg}", 8000)
+            self._reset_timpa()
+            self._validate_state()
+            self.notif.show_msg(
+                "warn", "Dekripsi dibatalkan untuk melindungi file asli Anda.", 4000
+            )
+
+    else:
+        self.notif.show_msg("err", f"Error: {msg}", 8000)

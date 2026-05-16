@@ -1,7 +1,8 @@
 """
 Modul: widgets.py
 Deskripsi: Kumpulan komponen UI (Widget) kustom.
-           Diperbarui: Penambahan HeroIconWidget untuk desain Dropzone bercahaya.
+           Diperbarui: Fix CustomTitleBar ke qframelesswindow.TitleBar agar
+           Aero Snap via Mouse Drag berfungsi sempurna.
 """
 
 import inspect
@@ -28,6 +29,9 @@ from PySide6.QtCore import (
     QPoint,
 )
 from PySide6.QtGui import QColor, QCursor
+
+# FIX PENTING: Import TitleBar dari library qframelesswindow
+from qframelesswindow import TitleBar
 
 from .styles import CLR_INNER, CLR_BORDER
 from core.vault import VaultStatus
@@ -98,9 +102,7 @@ class HeroIconWidget(QWidget):
         lbl_overlay.setGraphicsEffect(glow_overlay)
 
 
-# ────────────────────────────────────────────────────────────────────
-
-
+# ── CUSTOM TOOLTIP ──────────────────────────────────────────────────
 class CustomToolTip(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,6 +148,7 @@ class CustomToolTip(QLabel):
         self.hide()
 
 
+# ── ELIDED LABEL (Pemotong Teks ...) ────────────────────────────────
 class ElidedLabel(QLabel):
     def __init__(self, text="", mode=Qt.TextElideMode.ElideMiddle, parent=None):
         super().__init__(text, parent)
@@ -177,6 +180,7 @@ class ElidedLabel(QLabel):
         return QSize(50, super().sizeHint().height())
 
 
+# ── MESSAGE BOX MODERN ──────────────────────────────────────────────
 class ModernMessageBox(QDialog):
     def __init__(
         self, title, message, icon_name="mdi6.alert", icon_color="#F39C12", parent=None
@@ -245,7 +249,9 @@ class ModernMessageBox(QDialog):
             self.move(parent_center - self.rect().center())
 
 
-class CustomTitleBar(QFrame):
+# ── TITLE BAR CUSTOM ────────────────────────────────────────────────
+# FIX: Harus mewarisi TitleBar dari qframelesswindow, bukan QFrame
+class CustomTitleBar(TitleBar):
     def __init__(self, parent):
         super().__init__(parent)
         self.parent_window = parent
@@ -293,6 +299,9 @@ class CustomTitleBar(QFrame):
         lay.addWidget(self.btn_max)
         lay.addWidget(self.btn_close)
 
+        # FUNGSI mousePressEvent & mouseMoveEvent MANUAL TELAH DIHAPUS
+        # Agar drag diserahkan sepenuhnya ke Windows Aero Snap.
+
     def _toggle_maximize(self):
         if self.parent_window.isMaximized():
             self.parent_window.showNormal()
@@ -301,21 +310,8 @@ class CustomTitleBar(QFrame):
             self.parent_window.showMaximized()
             self.btn_max.setIcon(qta.icon("mdi6.window-restore", color="#8B95A5"))
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.drag_pos = event.globalPosition().toPoint()
 
-    def mouseMoveEvent(self, event):
-        if hasattr(self, "drag_pos"):
-            delta = event.globalPosition().toPoint() - self.drag_pos
-            self.parent_window.move(self.parent_window.pos() + delta)
-            self.drag_pos = event.globalPosition().toPoint()
-
-    def mouseReleaseEvent(self, event):
-        if hasattr(self, "drag_pos"):
-            del self.drag_pos
-
-
+# ── WIDGET LAINNYA ──────────────────────────────────────────────────
 class BigActionBtn(QPushButton):
     def __init__(self, title, subtitle, icon_name="mdi6.lock", parent=None):
         super().__init__(parent)
@@ -411,7 +407,8 @@ class AnimatedNotifBar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("NotifBar")
-        self.setFixedWidth(380)
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(500)
         self.setMinimumHeight(55)
         self.setStyleSheet("background-color: transparent; border-radius: 8px;")
 
@@ -500,6 +497,7 @@ class AnimatedNotifBar(QFrame):
         self.lbl_text.setText(msg)
 
         self.raise_()
+        self.adjustSize()
         self.show()
 
         if self.parentWidget():

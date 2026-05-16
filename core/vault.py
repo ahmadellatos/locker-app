@@ -13,9 +13,9 @@ import stat
 import time
 from pathlib import Path
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable
 from cryptography.exceptions import InvalidTag
-
+from loguru import logger
 from .crypto import CHUNK_SIZE, derive_key, make_encryptor, make_decryptor, safe_cb
 
 HEADER_SIZE = 16 + 12
@@ -328,6 +328,14 @@ def kunci_brankas(
 
         if hapus_asli:
             safe_cb(progress_cb, 0.95)
+            # Verifikasi vault bisa dibaca sebelum hapus file asli.
+            # Mencegah data loss jika vault corrupt akibat I/O error saat tulis.
+            if not _verify_vault_integrity(target_path, password):
+                return (
+                    VaultStatus.ERROR,
+                    "Vault gagal diverifikasi setelah ditulis. File asli tidak dihapus."
+                    "Coba periksa ruang disk dan integritas vault secara manual.",
+                )
             for p in valid_paths:
                 hapus_permanen(Path(p), secure_wipe)
 
@@ -352,6 +360,50 @@ def kunci_brankas(
         return VaultStatus.ERROR, str(exc)
 
 
+def _verify_vault_integrity(path: Path, password: str) -> bool:
+    """
+    Verifikasi PENUH integritas vault menggunakan AES-GCM Auth Tag.
+    Wajib dilakukan sebelum menghapus file asli untuk mencegah data loss
+    akibat file corrupt di tengah jalan (misal: disk penuh / I/O error).
+    """
+    try:
+        total_size = path.stat().st_size
+        if total_size < OVERHEAD:
+            return False
+
+        cipher_len = total_size - OVERHEAD
+
+        with path.open("rb") as fk:
+            salt = fk.read(16)
+            nonce = fk.read(12)
+            fk.seek(-TAG_SIZE, os.SEEK_END)
+            tag = fk.read(TAG_SIZE)
+
+            # Kembali ke awal ciphertext
+            fk.seek(HEADER_SIZE)
+
+            key = derive_key(password, salt)
+            decryptor = make_decryptor(key, nonce, tag)
+
+            # Baca seluruh ciphertext dalam mode chunking
+            bytes_remaining = cipher_len
+            while bytes_remaining > 0:
+                chunk_sz = min(CHUNK_SIZE, bytes_remaining)
+                chunk = fk.read(chunk_sz)
+                if not chunk:
+                    break
+                decryptor.update(chunk)
+                bytes_remaining -= len(chunk)
+
+            # Ini yang memicu validasi MAC dari seluruh file!
+            decryptor.finalize()
+
+        return True
+    except Exception as e:
+        logger.error(f"Verifikasi integritas gagal: {e}")
+        return False
+
+
 def buka_brankas(
     locked_path: str,
     password: str,
@@ -367,7 +419,7 @@ def buka_brankas(
         if total_size < OVERHEAD:
             return VaultStatus.ERROR, "File terlalu kecil/rusak."
 
-        cipher_len = total_size - 44
+        cipher_len = total_size - OVERHEAD
         base_dir = target_path.parent
 
         # FIX: Cek free space saat mengekstrak (Safety buffer 50MB)
